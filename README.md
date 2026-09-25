@@ -43,20 +43,21 @@ Live capture requires elevated privileges (`sudo` or `CAP_NET_RAW` on Linux). Of
 
 ## Documentation
 
-| Guide                                              | Description                                         |
-| -------------------------------------------------- | --------------------------------------------------- |
-| **[Getting Started](docs/getting-started.md)**     | Prerequisites, building, permissions, first capture |
-| **[Usage Examples](docs/usage.md)**                | Common recipes and workflows                        |
-| **[CLI Reference](docs/cli-reference.md)**         | Complete flag and option list                       |
-| **[Configuration](docs/configuration.md)**         | TOML config schema and precedence rules             |
-| **[Web Dashboard](docs/web-dashboard.md)**         | Real-time browser UI setup and tuning               |
-| **[Sharded Pipeline](docs/pipeline.md)**           | Multi-core architecture and tuning                  |
-| **[Flow Tracking](docs/flow-tracking.md)**         | Bidirectional flows, TCP state, RTT                 |
-| **[Anomaly Detection](docs/anomaly-detection.md)** | SYN flood and port scan detection                   |
-| **[Exports](docs/exports.md)**                     | Output formats (JSON, CSV, JSONL, pcap)             |
-| **[Performance](docs/performance.md)**             | Benchmarks and tuning checklist                     |
-| **[Troubleshooting](docs/troubleshooting.md)**     | Common issues and fixes                             |
-| **[Development](docs/development.md)**             | Repo layout, tests, extending protocols             |
+| Guide                                                 | Description                                                  |
+| ----------------------------------------------------- | ------------------------------------------------------------ |
+| **[Getting Started](docs/getting-started.md)**        | Prerequisites, building, permissions, first capture          |
+| **[Usage Examples](docs/usage.md)**                   | Common recipes and workflows                                 |
+| **[CLI Reference](docs/cli-reference.md)**            | Complete flag and option list                                |
+| **[Configuration](docs/configuration.md)**            | TOML config schema and precedence rules                      |
+| **[Web Dashboard](docs/web-dashboard.md)**            | Real-time browser UI setup and tuning                        |
+| **[Sharded Pipeline](docs/pipeline.md)**              | Multi-core architecture and tuning                           |
+| **[Flow Tracking](docs/flow-tracking.md)**             | Bidirectional flows, TCP state, RTT                           |
+| **[Anomaly Detection](docs/anomaly-detection.md)**    | SYN flood and port scan detection                             |
+| **[Exports](docs/exports.md)**                        | Output formats (JSON, CSV, JSONL, pcap)                      |
+| **[Performance](docs/performance.md)**                | Benchmarks and tuning checklist                              |
+| **[Streamlining Plan](docs/streamlining-plan.md)**       | Phased cleanup, correctness, examples, and measurement plan |
+| **[Troubleshooting](docs/troubleshooting.md)**        | Common issues and fixes                                      |
+| **[Development](docs/development.md)**                | Repo layout, tests, extending protocols                      |
 
 ## Notes
 
