@@ -118,7 +118,7 @@ Clients dedupe merged frames by `frame_seq` so reconnect / lag recovery does not
 
 These can be set in the `[web]` section of the config file. `--web-bind` and `--web-port` are available as CLI flags; the other keys require a config file.
 
-TLS and auth live under `[web.tls]` / `[web.auth]` and can be configured through the config file or via the `--web-tls*` / `--web-auth*` CLI flags (see [CLI Reference](cli-reference.md)).
+TLS and auth live under `[web.tls]` / `[web.auth]` and can be configured through the config file or via the `--web-tls*` / `--web-auth*` CLI flags (see [CLI appendix](streamlining-plan.md#cli-reference)).
 
 Packet sampling uses the capture-wide packet id, so `sample_rate` is global in both inline and pipeline modes. Packet detail storage is keyed by packet id and remains robust even when events arrive slightly out of order across worker shards. For authoritative defaults, see [Configuration](configuration.md).
 

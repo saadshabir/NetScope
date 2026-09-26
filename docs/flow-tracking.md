@@ -84,7 +84,7 @@ Flows are expired based on inactivity:
 - **Timeout**: Flows with no packets for `flow.timeout_secs` (default: 60s) are removed. Set to 0 to disable.
 - **Max flows**: When the flow table exceeds `flow.max_flows` (default: 100,000), the oldest flows by `last_seen` are evicted.
 
-Implementation note: NetScope pre-sizes the internal flow table based on `flow.max_flows` (with some headroom) to avoid hash map resizes during capture. This can increase initial memory reservation at startup, especially in pipeline mode where the limit applies per shard.
+NetScope pre-sizes each internal flow table from its configured budget (with some headroom) to avoid hash map resizes during capture. In pipeline mode, `flow.max_flows` is a total budget divided among workers. A busy shard can evict flows while another shard still has unused quota. The tracker checks for evictions at most once per second, so a burst can temporarily exceed a shard's quota before the next check.
 
 When deep TCP analysis is disabled, flow storage also switches to split compact IPv4/IPv6 key types internally, which reduces per-flow memory overhead in scale-mode captures.
 

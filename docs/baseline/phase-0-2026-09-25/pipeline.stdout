@@ -1,0 +1,15 @@
+NetScope v0.1.0
+Reading packets from pcap: /tmp/netscope-phase0-20260925/baseline-runs/known-two-packet.pcap
+Processing packets until EOF...
+Datalink: Ethernet
+Pipeline: 2 worker shards
+
+
+==================================================
+Capture complete (pipeline mode).
+  Packets captured:  2
+  Dispatch drops:    0
+  Kernel dropped:    0
+  Interface dropped: 0
+  Flow export (JSON): /tmp/netscope-phase0-20260925/baseline-runs/pipeline-flows.json
+==================================================

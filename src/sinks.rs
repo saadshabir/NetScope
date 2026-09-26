@@ -44,13 +44,16 @@ impl AlertJsonlSink {
 pub struct ExpiredFlowSinks {
     jsonl: Option<JsonlSink>,
     csv: Option<ExpiredFlowCsvSink>,
+    errors: Vec<String>,
 }
 
 impl ExpiredFlowSinks {
     pub fn open(jsonl: Option<&Path>, csv: Option<&Path>) -> Self {
+        let mut errors = Vec::new();
         ExpiredFlowSinks {
-            jsonl: open_optional_jsonl_sink(jsonl, "expired flows jsonl"),
-            csv: open_optional_csv_sink(csv, "expired flows csv"),
+            jsonl: open_optional_jsonl_sink(jsonl, "expired flows jsonl", &mut errors),
+            csv: open_optional_csv_sink(csv, "expired flows csv", &mut errors),
+            errors,
         }
     }
 
@@ -63,17 +66,24 @@ impl ExpiredFlowSinks {
             return Ok(());
         }
 
+        let mut failure = None;
         let mut disable_jsonl = false;
         if let Some(sink) = self.jsonl.as_mut() {
             for event in events {
                 if let Err(err) = sink.write(event) {
+                    self.errors
+                        .push(format!("expired flows jsonl write error: {err}"));
                     tracing::warn!(error = %err, "expired flows jsonl disabled after write error");
+                    failure.get_or_insert(err);
                     disable_jsonl = true;
                     break;
                 }
             }
             if !disable_jsonl && let Err(err) = sink.flush() {
+                self.errors
+                    .push(format!("expired flows jsonl flush error: {err}"));
                 tracing::warn!(error = %err, "expired flows jsonl disabled after flush error");
+                failure.get_or_insert(err);
                 disable_jsonl = true;
             }
         }
@@ -85,13 +95,19 @@ impl ExpiredFlowSinks {
         if let Some(sink) = self.csv.as_mut() {
             for event in events {
                 if let Err(err) = sink.write(event) {
+                    self.errors
+                        .push(format!("expired flows csv write error: {err}"));
                     tracing::warn!(error = %err, "expired flows csv disabled after write error");
+                    failure.get_or_insert(err);
                     disable_csv = true;
                     break;
                 }
             }
             if !disable_csv && let Err(err) = sink.flush() {
+                self.errors
+                    .push(format!("expired flows csv flush error: {err}"));
                 tracing::warn!(error = %err, "expired flows csv disabled after flush error");
+                failure.get_or_insert(err);
                 disable_csv = true;
             }
         }
@@ -99,7 +115,14 @@ impl ExpiredFlowSinks {
             self.csv = None;
         }
 
-        Ok(())
+        match failure {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
+    }
+
+    fn take_errors(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.errors)
     }
 }
 
@@ -107,6 +130,7 @@ impl ExpiredFlowSinks {
 pub struct OutputSinks {
     pub alerts_jsonl: Option<AlertJsonlSink>,
     pub expired_flows: ExpiredFlowSinks,
+    errors: Vec<String>,
 }
 
 impl OutputSinks {
@@ -115,10 +139,15 @@ impl OutputSinks {
         expired_flows_jsonl: Option<&Path>,
         expired_flows_csv: Option<&Path>,
     ) -> Self {
+        let mut errors = Vec::new();
         let alerts_jsonl = match alerts_jsonl {
             Some(path) => match AlertJsonlSink::open(path) {
                 Ok(sink) => Some(sink),
                 Err(err) => {
+                    errors.push(format!(
+                        "failed to open alerts jsonl '{}': {err}",
+                        path.display()
+                    ));
                     tracing::warn!(
                         error = %err,
                         path = %path.display(),
@@ -133,6 +162,7 @@ impl OutputSinks {
         OutputSinks {
             alerts_jsonl,
             expired_flows: ExpiredFlowSinks::open(expired_flows_jsonl, expired_flows_csv),
+            errors,
         }
     }
 
@@ -150,8 +180,14 @@ impl OutputSinks {
         if let Some(sink) = self.alerts_jsonl.as_mut()
             && let Err(err) = sink.write_alert(ts, kind, description)
         {
+            self.errors
+                .push(format!("alerts jsonl output error: {err}"));
             tracing::warn!(error = %err, "alerts jsonl disabled after write error");
             disable_alerts = true;
+            if disable_alerts {
+                self.alerts_jsonl = None;
+            }
+            return Err(err);
         }
         if disable_alerts {
             self.alerts_jsonl = None;
@@ -165,13 +201,28 @@ impl OutputSinks {
     ) -> Result<(), std::io::Error> {
         self.expired_flows.write_events(events)
     }
+
+    pub fn take_errors(&mut self) -> Vec<String> {
+        let mut errors = std::mem::take(&mut self.errors);
+        errors.extend(self.expired_flows.take_errors());
+        errors
+    }
 }
 
-fn open_optional_jsonl_sink(path: Option<&Path>, label: &str) -> Option<JsonlSink> {
+fn open_optional_jsonl_sink(
+    path: Option<&Path>,
+    label: &str,
+    errors: &mut Vec<String>,
+) -> Option<JsonlSink> {
     match path {
         Some(path) => match JsonlSink::new(path) {
             Ok(sink) => Some(sink),
             Err(err) => {
+                errors.push(format!(
+                    "failed to open {} '{}': {err}",
+                    label,
+                    path.display()
+                ));
                 tracing::warn!(
                     error = %err,
                     path = %path.display(),
@@ -185,11 +236,20 @@ fn open_optional_jsonl_sink(path: Option<&Path>, label: &str) -> Option<JsonlSin
     }
 }
 
-fn open_optional_csv_sink(path: Option<&Path>, label: &str) -> Option<ExpiredFlowCsvSink> {
+fn open_optional_csv_sink(
+    path: Option<&Path>,
+    label: &str,
+    errors: &mut Vec<String>,
+) -> Option<ExpiredFlowCsvSink> {
     match path {
         Some(path) => match ExpiredFlowCsvSink::new(path) {
             Ok(sink) => Some(sink),
             Err(err) => {
+                errors.push(format!(
+                    "failed to open {} '{}': {err}",
+                    label,
+                    path.display()
+                ));
                 tracing::warn!(
                     error = %err,
                     path = %path.display(),

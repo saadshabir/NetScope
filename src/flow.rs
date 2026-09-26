@@ -14,7 +14,7 @@ pub use key::{Endpoint, FlowDirection, FlowKey, FlowProtocol};
 pub use model::{
     ExpiredFlowEvent, ExpiredFlowReason, FlowDelta, FlowEntry, FlowSnapshot, TcpState,
 };
-pub use tracker::FlowTracker;
+pub use tracker::{FlowTracker, FlowTrackerStats};
 
 pub(crate) use model::update_tcp_state_fields;
 pub(crate) use scale::{ScaleFlowEntry, scale_base_ms};
@@ -209,6 +209,9 @@ mod tests {
         assert_eq!(removed, 1);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].reason, ExpiredFlowReason::Timeout);
+        assert_eq!(tracker.stats().created, 1);
+        assert_eq!(tracker.stats().expired, 1);
+        assert_eq!(tracker.stats().evicted, 0);
     }
 
     #[test]
@@ -221,6 +224,9 @@ mod tests {
         assert_eq!(removed, 1);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].reason, ExpiredFlowReason::Eviction);
+        assert_eq!(tracker.stats().created, 2);
+        assert_eq!(tracker.stats().expired, 0);
+        assert_eq!(tracker.stats().evicted, 1);
     }
 
     #[test]

@@ -8,8 +8,8 @@ netscope/
   netscope.example.toml         # Complete example config file
   LICENSE                       # MIT License
   README.md                     # Project landing page
-  CHANGELOG.md                  # Release history
-  docs/                         # Documentation (this directory)
+  docs/                         # Documentation
+    streamlining-plan.md          # Plan, baseline, CLI reference, and consolidated history
   scripts/
     perf/                       # Perf helper scripts and example configs
   benches/
@@ -197,7 +197,7 @@ Logging convention:
 
 When changing flags, config defaults, web message shapes, or pipeline behavior, update the matching docs in the same change:
 
-- `docs/cli-reference.md` for CLI changes in `src/cli.rs`
+- [CLI appendix](streamlining-plan.md#cli-reference) for changes in `src/cli.rs`
 - `docs/configuration.md` and `netscope.example.toml` for schema/default changes in `src/config.rs`
 - feature guides in `docs/` for behavioral changes in pipeline, flow tracking, anomaly detection, exports, or web code
 

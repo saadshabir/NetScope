@@ -1,9 +1,10 @@
 # NetScope streamlining plan
 
-- **Status:** Planning document; implementation has not started.
+- **Status:** Phases 0 and 1 complete. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget.
 - **Change type:** Focused cleanup with explicit behavior changes where current behavior is misleading.
 - **Baseline inspected:** 2026-09-24, `main` at `6355f8c`.
 - **Target:** A dependable Rust packet and flow investigation tool with reproducible correctness and performance evidence.
+- **Consolidated record:** This plan includes the detailed Phase 0 baseline, full CLI reference, and complete change history formerly kept in separate documents.
 
 This document is the execution plan for simplifying and strengthening NetScope. It is intentionally specific enough to turn each phase into reviewable changes. Checkboxes track work only after its acceptance checks pass; they do not indicate that a feature already works.
 
@@ -45,7 +46,7 @@ Priorities, in order:
 - TCP stream reassembly, TLS decryption, encrypted ClientHello inspection, or a packet-history database.
 - A remote, multi-user dashboard platform or a new frontend framework.
 - Guaranteed zero loss during unrestricted live capture. The goal is to **measure and report** the loss boundary under a stated setup.
-- Backward compatibility for developer-only benchmark commands or obsolete performance scripts. Any user-facing CLI/config change must appear in the changelog.
+- Backward compatibility for developer-only benchmark commands or obsolete performance scripts. Any user-facing CLI/config change must appear in the [change history appendix](#change-history).
 - A large cross-product test suite. The test selection rule below controls verification work.
 
 ### Test selection rule
@@ -94,7 +95,7 @@ The current repository already contains libpcap capture, classic PCAP reading, B
 | Integration tests write temporary one-packet PCAPs; no sample PCAP is tracked. | `tests/offline_read_pcap.rs`, `tests/pcap_rotation.rs` | A new reviewer cannot reproduce a meaningful investigation from the checkout. |
 | A fast offline file can finish before the periodic stats tick; the final summary lacks elapsed time and full processing counts. | `src/main.rs` inline and pipeline capture loops | Console stats are unsuitable as a benchmark data source. |
 | Offline pipeline dispatch uses `try_send`, so a fast file reader can drop packets when a worker queue is full. | `src/main.rs` pipeline capture loop | Offline results can be incomplete even though there is no live capture pressure. |
-| Pipeline anomalies are per worker, while routing hashes the canonical full flow tuple. Multiple sources attacking one destination can land on different workers. | `src/pipeline/router.rs`, `src/pipeline/worker.rs`, `docs/pipeline.md` | Current alert thresholds are not globally equivalent between inline and pipeline modes; the destination-to-one-shard sentence in `docs/pipeline.md` is wrong. |
+| Pipeline anomalies are per worker, while routing hashes the canonical full flow tuple. Multiple sources attacking one destination can land on different workers. | `src/pipeline/router.rs`, `src/pipeline/worker.rs`, `docs/pipeline.md` | Current alert thresholds are not globally equivalent between inline and pipeline modes; the former destination-to-one-shard claim has been corrected in the reader guides. |
 | Anomaly cleanup retains a nonempty queue for an inactive key without removing old events from that queue. | `src/analysis/anomaly.rs` | One-time sources can retain detection state longer than intended. |
 | The live throughput script starts replay before capture; the combined validation script uses macOS-specific `/usr/bin/time -l`. | `scripts/perf/validate-throughput.sh`, `scripts/perf/validate.sh` | Existing scripts cannot establish reliable loss or portable resource measurements. |
 | `.gitignore` contains literal Markdown fences; ignored `target/` output occupies about 6 GB locally. | `.gitignore`, local `target/` | Clean the ignore rules and generated output after a fresh build is reproducible. |
@@ -111,7 +112,7 @@ Delete a superseded path together with its code, tests, docs, config, and CI ref
 | Public synthetic-flow memory mode | Remove `--synthetic-flows` from the ordinary CLI and remove `src/memory.rs` if its only remaining use disappears. | Run scale-memory measurement from the developer benchmark harness. |
 | Ignore-rule clutter | Remove literal Markdown fences, duplicate patterns, and broad patterns with no project use from `.gitignore`. | Explicit rules for `target/`, local caches, generated traces, and benchmark output. |
 | Local generated output | Clean old ignored `target/` artifacts after a fresh build works. | Source, tracked fixtures, and user data remain untouched. |
-| Duplicate or unused runtime surface | Audit export variants, CLI flag pairs, config keys, web TLS/auth, and direct dependencies. | Remove only a slice with a tested replacement or a clear decision in the changelog; no speculative mass deletion. |
+| Duplicate or unused runtime surface | Audit export variants, CLI flag pairs, config keys, web TLS/auth, and direct dependencies. | Remove only a slice with a tested replacement or a clear decision in the [change history appendix](#change-history); no speculative mass deletion. |
 
 Expected retained areas are capture, protocol parsing, flow tracking, two narrow anomaly heuristics, optional pipeline, bounded exports, a local dashboard, and metrics. The intent is fewer paths and clearer ownership, not a directory shuffle that leaves the same complexity in place.
 
@@ -136,44 +137,226 @@ Expected file locations are guides, not mandates: `fixtures/pcap/` for small tra
 
 ### Steps
 
-- [ ] Verify `rust-toolchain.toml`, `Cargo.lock`, libpcap headers, and the documented build command on a clean checkout. Do not depend on old binaries in `target/`.
-- [ ] Run the existing CI gates: `cargo fmt -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, and `cargo build --locked --release`.
-- [ ] Record the command, commit, OS, toolchain, libpcap version, exit code, and any failures. Separate environment failures from source failures.
-- [ ] Run one temporary known PCAP through inline and pipeline modes. Save current console summaries, flow exports, alert output, and exit status as baseline observations. These are diagnostic records, not published benchmarks.
-- [ ] Inventory CLI flags, config keys, outputs, and documentation claims. Mark each as tested, untested, inaccurate, or internal-only. Include the `--synthetic-flows` path and all `--no-*` override pairs.
-- [ ] List parser and capture limitations precisely: supported link types, classic PCAP versus other capture formats, fragmentation, IPv6 extension headers, DNS scope, and packet-level TLS SNI scope.
+- [x] Verify `rust-toolchain.toml`, `Cargo.lock`, libpcap headers, and the documented build command on a clean checkout. Do not depend on old binaries in `target/`.
+- [x] Run the existing CI gates: `cargo fmt -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo test --locked`, and `cargo build --locked --release`.
+- [x] Record the command, commit, OS, toolchain, libpcap version, exit code, and any failures. Separate environment failures from source failures.
+- [x] Run one temporary known PCAP through inline and pipeline modes. Save current console summaries, flow exports, alert output, and exit status as baseline observations. These are diagnostic records, not published benchmarks.
+- [x] Inventory CLI flags, config keys, outputs, and documentation claims. Mark each as tested, untested, inaccurate, or internal-only. Include the `--synthetic-flows` path and all `--no-*` override pairs.
+- [x] List parser and capture limitations precisely: supported link types, classic PCAP versus other capture formats, fragmentation, IPv6 extension headers, DNS scope, and packet-level TLS SNI scope.
 
-**Deliverables:** A short baseline record in the eventual results area; a prioritized issue list with a reproduction for each confirmed defect. Add a regression check when the defect has a plausible recurrence and an observable expected result.
+**Deliverables:** The detailed baseline record in this plan, linked raw run outputs, and a prioritized issue list; a prioritized issue list with a reproduction for each confirmed defect. Add a regression check when the defect has a plausible recurrence and an observable expected result.
 
 **Exit gate:** A fresh checkout builds and runs an offline trace without privileges. Any remaining baseline failures have a reproducible command and clear owner.
+
+<a id="phase-0-baseline-evidence"></a>
+### Detailed Phase 0 baseline record — 2026-09-25
+
+**Status:** Complete. The baseline was built and run from a clean local Git clone of `main` at `eb9338b`, with an empty Git status and a fresh target directory. The executable code is unchanged from the plan's inspected baseline commit `6355f8c`; the difference between those commits is README and planning documentation.
+
+#### Build and CI gates
+
+Environment: macOS 27.0, Apple silicon (`arm64`), Rust `1.93.1` from `rust-toolchain.toml`, Cargo `1.93.0`, and libpcap `1.10.1`. `pcap-config` supplied the libpcap include and link flags, and a C probe against the installed headers/library returned the version above. The clean clone used `CARGO_TARGET_DIR=/tmp/netscope-phase0-20260925/checkout-target`; it did not use the repository's ignored `target/` output.
+
+| Command | Final result | Notes |
+| --- | --- | --- |
+| `cargo fmt -- --check` | Pass, exit 0 | Clean local clone. |
+| `cargo clippy --locked --all-targets -- -D warnings` | Pass, exit 0 | Clean local clone. |
+| `cargo test --locked` | Pass, exit 0; 137 tests | 120 library, 5 binary, 8 offline-PCAP integration, and 4 rotation tests. The first sandboxed attempt had 117 pass and 3 websocket tests fail because loopback bind returned `PermissionDenied`; rerunning the same suite from the clean clone with loopback access passed all 137. This was an environment restriction, not a source failure. |
+| `cargo build --locked --release` | Pass, exit 0 | Clean local clone. |
+
+#### Offline run baseline
+
+A temporary, synthetic classic PCAP contains two Ethernet/IPv4/TCP packets: a SYN and its SYN-ACK. It is 164 bytes, has SHA-256 `2fbe9c477444278c85282d8de0c944ced9041629432533eb7ef6a677959365f9`, and was read without elevated privileges. The exact raw terminal output, flow JSON, empty alert JSONL files, and exit codes are retained under `docs/baseline/phase-0-2026-09-25/`:
+
+- [Inline terminal output](baseline/phase-0-2026-09-25/inline.stdout), [flow export](baseline/phase-0-2026-09-25/inline-flows.json), [alerts](baseline/phase-0-2026-09-25/inline-alerts.jsonl)
+- [Pipeline terminal output](baseline/phase-0-2026-09-25/pipeline.stdout), [flow export](baseline/phase-0-2026-09-25/pipeline-flows.json), [alerts](baseline/phase-0-2026-09-25/pipeline-alerts.jsonl), [exit codes](baseline/phase-0-2026-09-25/exit-status.txt)
+
+Commands were `netscope --read-pcap <trace> --quiet --anomalies --alerts-jsonl <alerts> --export-json <flows>` and the same command with `--pipeline --workers 2`. Both exited 0, exported one equal flow record with 2 packets and 108 wire bytes, and emitted an empty alert file. The inline summary reported 2 captured packets, 0 parse errors, and 100% success. The pipeline summary reported 2 captured packets and 0 dispatch drops. It also printed kernel and interface drops as `0`, although those counters are unavailable for offline input. Neither summary reports elapsed wall time, input bytes, or a complete parse classification.
+
+A one-packet Ethernet PCAPNG probe also exited 0 on libpcap 1.10.1. This verifies only a minimal, single-interface Ethernet PCAPNG block; classic PCAP remains the reproducible baseline. Multi-interface PCAPNG, alternate timestamp resolutions, and other PCAPNG options were not checked.
+
+##### Reproduce the diagnostic inputs
+
+From the repository root, [the standard-library generator](../scripts/phase0_repros.py) recreates the temporary PCAPs and configs. Its hashes match the recorded two-packet, malformed-TCP, 10,000-frame, and 100-flow inputs. The 32-source SYN trace has SHA-256 `33da91fd9876b38273a994f6b348478260e7960028045cabe3a26cd28e7308c0`.
+
+```sh
+OUT=$(mktemp -d)
+python3 scripts/phase0_repros.py "$OUT"
+git clone --no-local . "$OUT/baseline"
+git -C "$OUT/baseline" checkout --detach eb9338b
+(cd "$OUT/baseline" && cargo build --locked --release)
+BASE_BIN="$OUT/baseline/target/release/netscope"
+```
+
+The baseline binary above is necessary to reproduce the historical offline queue drops. Drop totals depend on scheduling; 2,090 was one observed run, not a fixed expected count. The remaining commands also use that binary so they describe the recorded Phase 0 behavior. Build the current working tree separately to check the Phase 1.2 correction.
+
+```sh
+"$BASE_BIN" --read-pcap "$OUT/known-two-packet.pcap" --quiet --anomalies --alerts-jsonl "$OUT/inline-alerts.jsonl" --export-json "$OUT/inline-flows.json"
+"$BASE_BIN" --read-pcap "$OUT/known-two-packet.pcap" --quiet --anomalies --alerts-jsonl "$OUT/pipeline-alerts.jsonl" --export-json "$OUT/pipeline-flows.json" --pipeline --workers 2
+"$BASE_BIN" --read-pcap "$OUT/backpressure-10000.pcap" --config "$OUT/capacity-1.toml" --pipeline --workers 1 --quiet
+"$BASE_BIN" --read-pcap "$OUT/malformed-tcp.pcap" --quiet --export-json "$OUT/malformed-flows.json"
+"$BASE_BIN" --read-pcap "$OUT/syn-flood-32-sources.pcap" --config "$OUT/syn-flood.toml" --quiet --alerts-jsonl "$OUT/syn-inline.jsonl"
+"$BASE_BIN" --read-pcap "$OUT/syn-flood-32-sources.pcap" --config "$OUT/syn-flood.toml" --quiet --alerts-jsonl "$OUT/syn-pipeline.jsonl" --pipeline --workers 2
+"$BASE_BIN" --read-pcap "$OUT/many-flows-spread.pcap" --quiet --max-flows 1 --flow-timeout-s 0 --export-json "$OUT/max-inline.json"
+"$BASE_BIN" --read-pcap "$OUT/many-flows-spread.pcap" --quiet --max-flows 1 --flow-timeout-s 0 --export-json "$OUT/max-pipeline.json" --pipeline --workers 2
+```
+
+The malformed trace should report zero parse errors while exporting an empty flow array. The SYN trace should produce one inline alert and no pipeline alert with zero dispatch drops. The 100-flow trace should leave more than one final flow in each mode; the recorded run left 10 inline and 8 pipeline flows. A one-packet PCAPNG probe can be repeated with `"$BASE_BIN" --read-pcap "$OUT/one-packet.pcapng" --quiet`.
+
+The stale anomaly-queue finding below comes from source inspection, not a saved runtime measurement. To inspect the failure path, follow `AnomalyDetector::observe` in `src/analysis/anomaly.rs`: add one event to a key at time 1, then observe a different key after time 31 to trigger cleanup without revisiting the first key. Both cleanup methods retain any nonempty queue without first removing its expired events. A focused state test belongs with the Phase 3.2 fix.
+
+#### Inventory
+
+##### CLI flags
+
+**Tested:** `--config`, `--read-pcap`, `--count`, `--quiet`, `--write-pcap`, `--write-pcap-rotate-mb`, `--write-pcap-max-files`, `--export-json`, `--anomalies`, `--alerts-jsonl`, `--flow-timeout-s`, `--max-flows`, `--pipeline`, `--workers`, and `--help`. Coverage comes from the clean-checkout suite and the temporary baseline/reproduction runs.
+
+**Untested in this baseline:** `--interface`, `--filter`, `--promiscuous`, `--no-promiscuous`, `--snaplen`, `--timeout-ms`, `--list-interfaces`, `--hex-dump`, `--no-hex-dump`, `--no-quiet`, `--verbose`, `--export-csv`, `--expired-flows-jsonl`, `--expired-flows-csv`, `--stats`, `--no-stats`, `--stats-interval-ms`, `--top-flows`, `--no-anomalies`, `--web`, `--no-web`, `--web-bind`, `--web-port`, `--web-tls`, `--no-web-tls`, `--web-tls-cert`, `--web-tls-key`, `--web-auth`, `--no-web-auth`, `--web-auth-user`, `--web-auth-pass-file`, and `--version`.
+
+The tested/untested lists refer to long option names. Short aliases `-i`, `-f`, `-c`, `-p`, `-s`, `-t`, `-l`, `-v`, `-h`, and `-V` were not separately invoked.
+
+The eight boolean override pairs are `--promiscuous`/`--no-promiscuous`, `--hex-dump`/`--no-hex-dump`, `--quiet`/`--no-quiet`, `--stats`/`--no-stats`, `--anomalies`/`--no-anomalies`, `--web`/`--no-web`, `--web-tls`/`--no-web-tls`, and `--web-auth`/`--no-web-auth`. Their mutual exclusion is declared in Clap, but their config-override behavior has no direct test in the baseline suite. Existing coverage tests clearable path overrides instead.
+
+**Internal-only:** `--synthetic-flows <N>` is the planned developer memory-measurement path, not an ordinary user workflow. A 10-flow smoke run exited 0, but macOS reported RSS as unavailable, so no memory figure or budget result was produced. The current `docs/performance.md` wording should be qualified by platform until the replacement benchmark runner exists.
+
+##### TOML config keys
+
+The following keys were exercised by loading TOML during tests or reproductions:
+
+- `[analysis] alerts_jsonl`; `[output] expired_flows_jsonl` (path clearing test).
+- `[analysis.anomalies] enabled`; `[analysis.anomalies.syn_flood] enabled`, `window_secs`, `syn_threshold`, `unique_src_threshold`, `cooldown_secs`; `[analysis.anomalies.port_scan] enabled` (32-source alert reproduction).
+- `[pipeline] channel_capacity` (one-slot offline stress reproduction).
+
+All other TOML keys are **untested as TOML inputs**: `[capture] interface`, `read_pcap`, `promiscuous`, `snaplen`, `timeout_ms`, `buffer_size_mb`, `immediate_mode`, `filter`; `[run] count`; `[output] write_pcap`, `write_pcap_rotate_mb`, `write_pcap_max_files`, `export_json`, `export_csv`, `expired_flows_csv`, `hex_dump`, `quiet`; `[flow] timeout_secs`, `max_flows`; `[stats] enabled`, `interval_ms`, `top_flows`; `[analysis] rtt`, `retrans`, `out_of_order`; `[analysis.anomalies.port_scan] window_secs`, `unique_ports_threshold`, `unique_hosts_threshold`, `cooldown_secs`; `[web] enabled`, `bind`, `port`, `tick_ms`, `top_n`, `packet_buffer`, `sample_rate`, `payload_bytes`; `[web.tls] enabled`, `cert_path`, `key_path`; `[web.auth] enabled`, `username`, `password`, `password_file`; `[pipeline] enabled`, `workers`.
+
+This is TOML-input coverage, not a claim that all corresponding code is untested: the suite has unit coverage for flow tracking, web validation/auth, parser behavior, and export serialization. It does not load every key through a single config example or verify every CLI/config precedence pair.
+
+##### Outputs
+
+| Output | Status |
+| --- | --- |
+| Final terminal summary | Tested on the two-packet trace; final run accounting is incomplete. Per-packet output was not exercised. |
+| Flow JSON | Tested inline and pipeline; parsed flow records are equal. |
+| Flow CSV | Serialization layout has unit tests; CLI file output was not exercised here. |
+| PCAP write and rotation | Integration-tested by the clean-checkout suite. |
+| Alert JSONL | Tested with an empty baseline and a positive inline SYN-flood reproduction; pipeline mismatch is recorded below. |
+| Expired-flow JSONL/CSV | Path clearing and CSV serialization have unit coverage; end-to-end sink behavior was not exercised here. |
+| Web health/auth/metrics/WebSocket behavior | Unit-tested; the full suite needed loopback socket access. No live capture-to-dashboard run was made. |
+| Periodic stats and live kernel/interface drop counters | Untested in this run. Offline pipeline output currently displays unavailable kernel/interface counters as zero. |
+| Output write/flush errors and machine-readable final summary | Not verified; the versioned final summary is not implemented yet. |
+
+##### Reader-facing documentation claims
+
+| Page / claim | Status | Evidence or limitation |
+| --- | --- | --- |
+| `README.md`: unprivileged offline PCAP path | **Tested** | Clean release binary read the synthetic trace without elevated privileges. |
+| `README.md`: supported parser families and IPv4/IPv6 fragment limits | **Tested** | Parser unit tests and source inspection support the stated scope; live capture remains untested. |
+| `getting-started.md`: live permissions and installation steps | **Untested** | This baseline only verifies the macOS build and offline path. |
+| `usage.md`: offline read, pipeline, and export recipes | **Tested** | Offline path, both modes, JSON export, and PCAP rotation integration cases ran. Other live examples were not exercised. |
+| [CLI appendix](#cli-reference): option names and rotation prerequisites | **Tested** | `--help` agrees with `src/cli.rs`; runtime validation requires `--write-pcap` and both positive rotation settings. Most option behavior remains untested as listed above. |
+| `configuration.md`: defaults and complete schema | **Untested** | Field names/defaults match `src/config.rs` by inspection. Only the TOML keys listed above were exercised through config loading. |
+| `pipeline.md`: same bidirectional flow maps to one shard | **Tested** | Router unit tests cover reversed flow directions and supported link types. |
+| `pipeline.md`: offline input can be dropped at a full queue | **Tested on baseline; fixed in current working tree** | The 10,000-frame reproduction recorded 2,090 dispatch drops on `eb9338b`; current Phase 1.2 work switches offline input to backpressure. |
+| `flow-tracking.md`: pipeline flow caps apply per shard | **Tested** | The 100-flow reproduction retained more than `max_flows = 1`; the configured cap is per worker and pruning is periodic, so burst-time memory may exceed the apparent limit. |
+| `anomaly-detection.md`: per-worker thresholds and cleanup | **Corrected after baseline** | Full-flow-tuple routing does not pin all sources for a destination to one shard; stale nonempty queues survive cleanup if their keys are never revisited. The guide now states both limits. |
+| `exports.md`: JSON, PCAP, and rotation outputs | **Tested** | Flow JSON and rotation integrations passed. CSV and expired-flow sinks have only partial serializer/path coverage. |
+| `web-dashboard.md`: health, auth, metrics, and WebSocket behavior | **Tested at unit level** | Test suite passed with loopback access. No live capture or browser session was run. |
+| `performance.md`: current benchmark table and memory check | **Untested** | The numbers lack raw environment/run records and remain microbenchmarks. On this Mac, `--synthetic-flows 10` could not report RSS or a budget result, so the memory-check wording needs qualification. |
+| `development.md` and `troubleshooting.md`: developer scripts and operational recipes | **Untested** | The CI gates ran; the standalone replay and validation scripts were not run in this baseline. |
+
+#### Parser and capture limits
+
+- Offline input goes through libpcap. Classic PCAP passed the baseline; only a minimal one-interface Ethernet PCAPNG file was separately verified. Live capture requires the usual OS/interface permissions and was not exercised.
+- The parser maps Ethernet (DLT 1), Linux cooked SLL (113), loopback NULL (0), loopback LOOP (108), and raw IP (12 and 101). Other data-link values are rejected. Existing integration tests cover Ethernet, SLL, NULL loopback, and raw-IP value 101; value 12 and LOOP capture-file dispatch were not separately exercised.
+- Ethernet parsing recognizes 802.1Q and 802.1ad VLAN tags. The parsed VLAN stack stores up to 4 tags; excess tags set its truncated marker. The suite covers VLAN/QinQ parsing and stack overflow.
+- IPv4 and IPv6 headers are parsed with length bounds. IPv4 and IPv6 non-initial fragments are skipped for flow tracking; there is no fragment reassembly. IPv6 walks at most 16 recognized extension headers (Hop-by-Hop, Routing, Fragment, AH, and Destination Options); ESP, No Next Header, and unrecognized next-header values stop the walk. Depth and truncated-extension cases have unit tests.
+- TCP, UDP, ICMP, and ICMPv6 headers are recognized; only TCP and UDP create flows. A malformed TCP or UDP header is currently converted to `transport = None` while the overall packet parse succeeds. It can therefore be reported as a 100% successful packet even though no transport header or flow was recognized.
+- DNS decoding is packet-level and limited to UDP involving port 53. It does not claim DNS-over-TCP or encrypted DNS inspection.
+- TLS SNI extraction is best-effort over one TCP payload containing a ClientHello. There is no TCP stream reassembly, so split ClientHello messages may be missed; ECH can hide the real SNI. Only valid ASCII hostname values are surfaced.
+
+#### Prioritized findings and reproductions
+
+| Priority | Finding and reproduction | Owner / status |
+| --- | --- | --- |
+| P0 | **Offline pipeline can lose frames.** On baseline `eb9338b`, one run of a 10,000-frame repeated-TCP PCAP with `[pipeline] channel_capacity = 1`, `--pipeline --workers 1`, and `--quiet` exited 0 but reported 2,090 dispatch drops. Input hash: `ae572a29ff4d02214f40412cdaa1437a6020fe17ff82ea806f0a052b5360678e`. | Phase 1.2. The current working-tree change replaces offline `try_send` with bounded blocking dispatch and adds a one-slot regression test; that test's pass is recorded in the plan. |
+| P1 | **Malformed transport is reported as fully parsed.** A single truncated TCP-header PCAP (hash `a05ee6e17587e68b3070e9ee7b0af6f5c7ecbe02b7446858b62a90c5ffb98add`) run with `--read-pcap <file> --quiet --export-json <flows>` exited 0, printed `Parse errors: 0` and `Success rate: 100.0%`, and exported no flow. UDP follows the same `parse_transport` error-swallowing path. | Phase 1.3. Add targeted malformed TCP/UDP classification assertions. |
+| P1 | **Final summaries do not account for a run.** The two-packet trace has no elapsed time, input-byte total, transport-parse count, or worker-completion count. In offline pipeline mode, unavailable kernel/interface counters are displayed as `0`. | Phase 1.1. Define and test the versioned final summary and explicit unavailable values. |
+| P1 | **Pipeline anomaly decisions differ from inline.** The generated 32-source SYN trace for one destination with `syn_threshold = 32` and `unique_src_threshold = 32` emitted one inline alert, but none with two pipeline workers and zero dispatch drops. Shard selection hashes the canonical full flow tuple, so a shared destination does not imply a shared shard. | Phase 3.2. Make mode semantics equivalent or reject unsupported pipeline/anomaly combinations. The reader guides now state this limitation. |
+| P2 | **`max_flows` is a soft, per-worker bound.** A 100-flow trace spread over 10 seconds (SHA-256 `93b2b62855fbd306d5d987d0cd1e935c32fee38cf1fe62d094327af4edcb0c0c`) run with `--max-flows 1 --flow-timeout-s 0 --export-json <flows>` retained 10 inline flows and 8 across two pipeline workers. Pruning is periodic (at most once per second), and each worker gets its own configured limit. | Phase 1.3. Add skewed-shard and burst tests; document the total budget and transient overshoot. |
+| P2 | **Anomaly windows can retain stale per-key queues.** Source-level repro: observe one event for each of many unique scan sources or SYN-flood destinations, then advance beyond the configured window and the 30-second cleanup interval without revisiting those keys. Cleanup removes empty queues, but stale events are only popped when the same key is observed again, so these queues remain nonempty. | Phase 3.2. Add a bounded-state test after event-time advances. The guide now states this limit. |
+| P3 | **Performance evidence is not reproducible yet.** The Criterion table in `docs/performance.md` has no saved machine, commit, input hash, or raw run record; it describes isolated functions and cannot substantiate whole-program capture throughput. The synthetic RSS path also returned unavailable on this macOS host. | Phase 4 and Phase 7. Replace or qualify the headline numbers after the reproducible runner is built. |
+
+The Phase 1.2 regression already present in the working tree covers the first finding. The remaining findings have observable expected results and are assigned to their owning phase above; this baseline does not add failing tests ahead of those fixes.
+
+**Completion record (2026-09-25):** All Phase 0 gates passed from a clean local clone of `eb9338b`; all 137 tests passed after allowing loopback sockets for the WebSocket tests. A no-root PCAP run completed in both modes and its raw outputs are saved in [the detailed Phase 0 record below](#phase-0-baseline-evidence). Confirmed gaps, reproductions, and phase owners are included in the detailed record below. The offline pipeline-drop issue is already addressed by the existing, uncommitted Phase 1.2 change.
 
 ## Phase 1 — Make every run account for its work
 
 ### 1.1 Define final-run counters and output
 
-- [ ] Add a final summary that is emitted after worker shutdown, output flushes, and flow export. Offer a machine-readable JSON form, for example `--summary-json <PATH>`, while preserving a readable terminal summary.
-- [ ] Version the JSON schema. Define stable names and units for input frames, input wire bytes, packets parsed, packets with a recognized transport header, malformed or unsupported packets, worker-processed packets, flows created/expired/evicted, alerts emitted, elapsed wall seconds, and output errors.
-- [ ] Report dispatch, kernel/libpcap, and interface drops as separate fields. Use `null` or an explicit unavailable state for counters that an offline PCAP cannot provide; never convert “unavailable” into zero.
-- [ ] Count at the layer where each event occurs. Reconcile `frames_read = dispatched + dispatch_drops` in pipeline mode and `dispatched = worker_processed + worker_failures` after draining workers. State whether a packet with an unrecognized higher layer still counts as parsed at the link or network layer.
-- [ ] Include mode, source, worker count, effective config, and application version in the summary or its adjacent run manifest. Keep the summary cheap enough that normal use does not require the benchmark runner.
-- [ ] Add a compact set of boundary tests for zero packets, a short run without a stats tick, malformed or unsupported input, and pipeline shutdown. Combine cases where one fixture can verify several counters; test both modes where their behavior can differ.
+- [x] Add a final summary that is emitted after worker shutdown, output flushes, and flow export. Offer a machine-readable JSON form, for example `--summary-json <PATH>`, while preserving a readable terminal summary.
+- [x] Version the JSON schema. Define stable names and units for input frames, input wire bytes, packets parsed, packets with a recognized transport header, malformed or unsupported packets, worker-processed packets, flows created/expired/evicted, alerts emitted, elapsed wall seconds, and output errors.
+- [x] Report dispatch, kernel/libpcap, and interface drops as separate fields. Use `null` or an explicit unavailable state for counters that an offline PCAP cannot provide; never convert “unavailable” into zero.
+- [x] Count at the layer where each event occurs. Reconcile `frames_read = dispatched + dispatch_drops` in pipeline mode and `dispatched = worker_processed + worker_failures` after draining workers. State whether a packet with an unrecognized higher layer still counts as parsed at the link or network layer.
+- [x] Include mode, source, worker count, effective config, and application version in the summary or its adjacent run manifest. Keep the summary cheap enough that normal use does not require the benchmark runner.
+- [x] Add a compact set of boundary tests for zero packets, a short run without a stats tick, malformed or unsupported input, and pipeline shutdown. Combine cases where one fixture can verify several counters; test both modes where their behavior can differ.
 
 ### 1.2 Make offline pipeline processing lossless
 
-- [ ] Use bounded backpressure when reading an offline file. The reader may wait for worker queue space because a PCAP has already been captured and can be processed at the workers' rate.
-- [ ] Keep live capture nonblocking where waiting would shift loss into libpcap or the kernel. Record every dispatch failure.
-- [ ] Ensure shutdown and error paths drain or explicitly account for queued packets. Test with a queue capacity small enough to force backpressure.
-- [ ] Validate that output PCAP and flow exports represent the documented stage of processing, especially when live dispatch drops occur.
+- [x] Use bounded backpressure when reading an offline file. The reader may wait for worker queue space because a PCAP has already been captured and can be processed at the workers' rate.
+- [x] Keep live capture nonblocking where waiting would shift loss into libpcap or the kernel. Record every dispatch failure.
+- [x] Ensure shutdown and error paths drain or explicitly account for queued packets. A worker disconnect now returns a visible error; an integration regression case uses a one-packet queue and verifies the final flow export after worker shutdown.
+- [x] Validate output PCAP and flow exports when live dispatch drops occur. A deterministic queue-full live-dispatch simulation verifies that the captured PCAP retains the dropped input, dispatch accounting records the drop, and the flow export contains the already-queued flow without the dropped flow.
+
+**Progress record (2026-09-25):** Implemented blocking dispatch for offline PCAP input, kept live dispatch nonblocking with counted queue-full drops, and made worker disconnections fail visibly. The one-slot, 10,000-frame offline regression passes with zero drops; inline and pipeline runs produce identical capture PCAPs, flow exports, and packet-accounting totals. A deterministic live queue-full simulation verifies capture-PCAP and flow-export behavior across the capture/worker boundary.
 
 ### 1.3 Clarify parsing and flow limits
 
-- [ ] Stop counting a malformed TCP or UDP header as a fully successful transport parse. Keep partial link/network decode available and expose the classification.
-- [ ] Make `max_flows` have an honest pipeline meaning. Prefer a documented global budget divided among workers if that can be enforced without shared hot-path contention; test skewed shard distribution and explain early eviction if the budget is partitioned.
-- [ ] Add bounds checks and tests for truncated VLAN, IPv4/IPv6, TCP/UDP, DNS, and TLS inputs. Reuse existing parser tests; add only cases that close an identified gap.
+- [x] Stop counting a malformed TCP or UDP header as a fully successful transport parse. Keep partial link/network decode available and expose the classification.
+- [x] Make `max_flows` have an honest pipeline meaning. Prefer a documented global budget divided among workers if that can be enforced without shared hot-path contention; test skewed shard distribution and explain early eviction if the budget is partitioned.
+- [x] Add bounds checks and tests for truncated VLAN, IPv4/IPv6, TCP/UDP, DNS, and TLS inputs. Reuse existing parser tests; add only cases that close an identified gap.
+
+### Phase 1 implementation details
+
+**Final run summary**
+
+- Added `--summary-json <PATH>` and `output.summary_json`. Schema version 1 is written after capture processing, worker shutdown, sink flushes, and flow export. The terminal summary remains available without JSON output.
+- The stable top-level fields are `schema_version`, `application_version`, `status`, `run_error`, `mode`, `source`, `worker_count`, `elapsed_wall_seconds`, `effective_config`, `frames_read`, `input_wire_bytes`, `packets_parsed`, `packets_with_transport_header`, `malformed_or_unsupported_packets`, `dispatched_frames`, `dispatch_drops`, `worker_processed_frames`, `worker_failures`, `flows_created`, `flows_expired`, `flows_evicted`, `alerts_emitted`, `kernel_drops`, `interface_drops`, and `output_errors`.
+- `status` is `success`, `failed`, or `interrupted`; `source` identifies either `pcap:<path>` or `interface:<name>`. `effective_config` records the effective capture, flow, analysis, stats, output, web, and pipeline settings without credentials. Its named settings include `capture` (`link_type`, `filter`, `snaplen`, `timeout_ms`, `promiscuous`, `buffer_size_mb`, `immediate_mode`), `packet_limit`, `flow_timeout_secs`, `max_flows`, `rtt_tracking`, `retransmission_tracking`, `out_of_order_tracking`, `anomaly_detection`, `anomaly_settings`, `stats`, `output`, `web`, `pipeline_enabled`, `requested_workers`, and `pipeline_channel_capacity`.
+- `input_wire_bytes` sums the original wire lengths. `packets_parsed` counts frames whose link header was recognized; `packets_with_transport_header` counts recognized transport headers. A partial packet can count as parsed and also as malformed or unsupported. Pipeline counters are `null` in inline mode, and kernel/interface drop counters are `null` for offline input or when unavailable.
+- Pipeline accounting reconciles `frames_read = dispatched_frames + dispatch_drops` and, after worker shutdown, `dispatched_frames = worker_processed_frames + worker_failures`. Flow lifecycle and alert counters report observed events. Output open, write, flush, and export failures are recorded in `output_errors` and make the run fail.
+
+**Dispatch and output behavior**
+
+- Offline PCAP input uses blocking sends to bounded worker queues, so queue pressure slows file reading instead of dropping frames. Live capture uses nonblocking sends; queue-full and disconnected sends are counted as dispatch drops.
+- Worker and aggregator shutdown is attempted on capture and PCAP output error paths. Pipeline flow export uses final worker snapshots after shutdown.
+- `--write-pcap` records capture-thread input before dispatch. A live frame dropped from a full worker queue remains in the output PCAP and is absent from worker-side flow tracking and its exports.
+
+**Parsing and flow budget**
+
+- Recognized link/network data is retained when a TCP or UDP header is malformed. The parser marks malformed transport data separately; unknown protocols are marked unsupported. Such partial packets no longer count as having a recognized transport header.
+- In pipeline mode, nonzero `flow.max_flows` is a total budget split across workers, with any remainder assigned to the first workers. The actual worker count is reduced when necessary to give every shard a quota. A busy shard can evict early while another has spare quota; pruning runs at most once per second, so a burst can temporarily exceed a shard quota. Zero remains unlimited.
+
+**Regression coverage**
+
+- Zero-frame, malformed-transport, and output-open-error integration cases check summary values and failure status.
+- `offline_pipeline_backpressures_and_processes_every_frame` uses a one-slot queue and 10,000 frames; it checks zero dispatch drops, reconciled counts, identical inline/pipeline PCAP output, and identical flow exports.
+- `live_dispatch_drop_keeps_capture_pcap_and_counts_the_drop` forces a full live-dispatch queue; it checks the dropped frame remains in the capture PCAP, accounting reports the drop, and the flow export contains only the already-queued flow.
+- Parser boundary coverage includes truncated VLAN, IPv4/IPv6, TCP/UDP, DNS, and TLS input. The full `cargo test --locked --offline` suite passes with loopback access for WebSocket tests.
+
+**Existing documentation updated**
+
+- CLI reference: added the summary option and a short behavior note; the field-level contract lives in this plan and the full flag list is in [Appendix A](#cli-reference).
+- `docs/configuration.md`: documented `output.summary_json`, offline queue behavior, and the pipeline-wide `flow.max_flows` budget.
+- `docs/pipeline.md`: documented live/offline dispatch, which stage the PCAP and flow exports represent, the global flow budget, and corrected shard-routing behavior.
+- `docs/flow-tracking.md`: explained per-shard quotas, early eviction, and the once-per-second pruning check.
+- Change history: recorded the summary output, parsing correction, pipeline flow budget, and offline backpressure changes in [Appendix B](#change-history).
 
 **Deliverables:** Stable summary contract, corrected offline dispatch, targeted regression tests, updated CLI/config docs.
 
 **Exit gate:** Short and large offline fixtures finish with zero dispatch drops, their counts reconcile, and inline/pipeline results represent the same input packets.
+
+**Completion record (2026-09-25):** All Phase 1 checks and its exit gate pass. The 10,000-frame parity regression confirms equal inline/pipeline packet accounting, PCAP output, and flow export. `cargo fmt -- --check` and `cargo clippy --locked --offline --all-targets -- -D warnings` pass. `cargo test --locked --offline` passes when run with loopback access for the WebSocket tests.
 
 ## Phase 2 — Ship sample PCAPs and investigations
 
@@ -319,11 +502,11 @@ The legacy `docs/` set has 12 feature and reference pages with repeated setup, o
 | --- | --- | --- | --- |
 | `README.md` | What NetScope does, one offline command, limits, and a short navigation list | Current README | Replace its long feature list and 13-row doc menu with a compact overview |
 | `docs/quickstart.md` | Build, first PCAP, live permissions, a few common commands, and brief troubleshooting | `getting-started.md`, `usage.md`, `troubleshooting.md` | All three old pages |
-| `docs/reference.md` | CLI/config defaults and precedence, export schemas, and concise option tables | `cli-reference.md`, `configuration.md`, `exports.md` | All three old pages |
+| `docs/reference.md` | CLI/config defaults and precedence, export schemas, and concise option tables | `CLI appendix`, `configuration.md`, `exports.md` | All three old pages |
 | `docs/design.md` | Pipeline, flow model, supported protocol depth, anomaly semantics, dashboard behavior, and contributor notes | `pipeline.md`, `flow-tracking.md`, `anomaly-detection.md`, `web-dashboard.md`, `development.md` | All five old pages |
 | `docs/performance.md` | Benchmark method, measured results, tuning grounded in data, and live-loss method | Current `performance.md` | Replace its unsupported result table and repeated tuning prose |
 | `docs/comparison.md` | Honest tool roles and exact comparison commands | New Phase 6 work | No legacy page |
-| `docs/streamlining-plan.md` | Temporary work tracking and decision record | This plan | After acceptance, summarize the outcome in `CHANGELOG.md` and remove this plan from maintained docs |
+| `docs/streamlining-plan.md` | Execution plan, baseline evidence, full CLI reference, and consolidated change history | This plan and the former CLI, Phase 0, and changelog documents | Retain as the single project record; do not recreate standalone CLI or changelog documents |
 
 - [ ] Migrate only accurate, useful content. Rewrite repeated paragraphs into a table, a command example, or a short explanation; do not paste old pages together into a larger wall of text.
 - [ ] Keep each reader page task-oriented: start with the answer or command, then include the minimum detail needed to use it correctly. Put exhaustive generated CLI help in `netscope --help` rather than prose copies of every flag.
@@ -331,7 +514,7 @@ The legacy `docs/` set has 12 feature and reference pages with repeated setup, o
 - [ ] Replace the README's current long documentation menu with links to quickstart, examples, reference, design, performance, and comparison. Keep the plan link separate as an active-work item.
 - [ ] Search all Markdown links and command references before deleting any old page. Update README, examples, CI, and remaining docs, then check that no local link points to a removed file.
 - [ ] Delete the 11 superseded pages only after the new pages contain the necessary commands, caveats, and output schemas. Review the final docs list and remove placeholder pages that add no distinct value.
-- [ ] At final handoff, transfer accepted decisions and measured evidence to maintained docs and `CHANGELOG.md`, remove this execution plan, and remove its README link. Keep it until all phase gates have been checked.
+- [ ] At final handoff, transfer durable product guidance and measured findings to the reader-facing docs. Retain this consolidated plan as the execution and change-history record.
 
 **Documentation exit gate:** A reader can find the first runnable example in the README, answer a usage question from quickstart/reference, and understand the main tradeoffs from design/performance without following a chain of near-duplicate pages.
 
@@ -358,21 +541,21 @@ The legacy `docs/` set has 12 feature and reference pages with repeated setup, o
 - [ ] Sample PCAPs contain synthetic data only and regenerate to their manifest hashes.
 - [ ] Offline examples work without root; live examples state required privileges.
 - [ ] Exit codes and summaries expose partial processing and output failures.
-- [ ] `docs/` contains five reader pages at final handoff; old links, superseded pages, and this temporary plan are gone after their accepted decisions are recorded.
+- [ ] `docs/` contains five reader pages plus this consolidated plan; superseded standalone pages and their links are gone.
 - [ ] The final diff removes more confusion than it adds, and each retained feature has a tested path.
 
-**Deliverables:** Focused README/docs, cleaned scripts and ignore rules, final CI workflow, release notes or changelog entry, and a reviewed plan-to-outcome crosswalk before this temporary plan is removed.
+**Deliverables:** Focused README/docs, cleaned scripts and ignore rules, final CI workflow, an updated change-history appendix, and a reviewed plan-to-outcome crosswalk.
 
 **Exit gate:** A clean checkout passes CI, the sample investigations reproduce, and the performance and comparison pages cite concrete evidence.
 
 ## Migration and breaking changes
 
-The cleanup should avoid gratuitous user-facing churn, but it should not keep a misleading compatibility path. Record every actual CLI, config, output-schema, and documentation-path change in one compact changelog table.
+The cleanup should avoid gratuitous user-facing churn, but it should not keep a misleading compatibility path. Record every actual CLI, config, output-schema, and documentation-path change in the [change history appendix](#change-history).
 
 - `--synthetic-flows` is a developer measurement path scheduled to leave the normal CLI after its replacement exists. Benchmark scripts that call it must migrate to the new runner.
 - If `--summary-json` is added, version its schema from the first release. Existing human-readable output remains for people, but scripts should consume JSON rather than scrape prose.
 - If pipeline anomaly detection cannot meet the target semantics, reject `--pipeline --anomalies` with a clear message and document the inline command. Do not keep the weaker per-shard interpretation under the same flag combination.
-- Consolidated docs replace 11 legacy paths. Update all repository links and commands before deletion; list moved topics in the changelog. Avoid maintaining 11 redirect stubs just to preserve the old catalogue.
+- Consolidated docs replace 11 legacy paths. Update all repository links and commands before deletion; list moved topics in the [change history appendix](#change-history). Avoid maintaining 11 redirect stubs just to preserve the old catalogue.
 - Existing user PCAPs, flow exports, and alert files are data. The cleanup does not delete or rewrite them. A changed export schema needs a version note and a sample record.
 - Existing `target/` binaries and `tmp/` results are generated local artifacts. Cleaning them is separate from source removal and occurs only after the build and benchmark paths work.
 
@@ -437,6 +620,271 @@ These decisions are deliberately scheduled after the relevant measurements or te
 - [ ] README, five final reader pages, CLI help, example config, and actual behavior agree; superseded docs and their internal links are gone.
 - [ ] Old perf scripts, developer-only CLI paths, unsupported numbers, and generated clutter have been removed or replaced according to the inventory.
 - [ ] Ordinary CI runs only the useful nonprivileged checks; long performance and live replay evidence is recorded separately.
-- [ ] The changelog lists behavior changes, removals, and evidence. A plan-to-outcome crosswalk confirms every accepted phase gate before this temporary plan is removed.
+- [ ] The change-history appendix lists behavior changes, removals, and evidence. A plan-to-outcome crosswalk confirms every accepted phase gate.
 
 The final handoff should state what changed, the exact verification commands that passed, the measured results and their limits, and any remaining risks. No numeric target will be invented to manufacture a pass; the first measured baseline establishes the starting point for future improvement.
+
+<a id="cli-reference"></a>
+## Appendix A — CLI reference
+
+This is the complete flag reference formerly maintained in `docs/cli-reference.md`. The configuration schema remains in [Configuration](configuration.md).
+
+```
+Usage: netscope [OPTIONS]
+```
+
+This section lists CLI flags only. Some runtime tuning knobs are config-file only; see [Configuration](configuration.md) for the full schema.
+
+Defaults below refer to the compiled defaults before any `--config` file is loaded. If a config file is present, explicitly provided CLI flags still take precedence.
+
+For boolean flags, the "Default" column describes the resulting default behavior, not that the flag is implicitly passed on the command line.
+
+### Capture Options
+
+| Flag                  | Short | Type   | Default | Description                                                                                      |
+| --------------------- | ----- | ------ | ------- | ------------------------------------------------------------------------------------------------ |
+| `--interface <IFACE>` | `-i`  | string | (auto)  | Network interface to capture on (e.g., `en0`, `eth0`). If omitted, the system default is used.   |
+| `--read-pcap <PATH>`  |       | path   | (none)  | Read packets from an offline pcap file. Conflicts with `--interface` and promiscuous mode flags. |
+| `--filter <EXPR>`     | `-f`  | string | (none)  | BPF filter expression (e.g., `"tcp port 80"`, `"host 192.168.1.1"`).                             |
+| `--count <N>`         | `-c`  | int    | 0       | Maximum packets to process. 0 = unlimited (live: Ctrl-C; offline: EOF).                          |
+| `--promiscuous`       | `-p`  | flag   | on      | Capture in promiscuous mode.                                                                     |
+| `--no-promiscuous`    |       | flag   |         | Disable promiscuous mode.                                                                        |
+| `--snaplen <N>`       | `-s`  | int    | 65535   | Maximum bytes captured per packet.                                                               |
+| `--timeout-ms <MS>`   | `-t`  | int    | 100     | Read timeout in milliseconds for the pcap handle.                                                |
+| `--list-interfaces`   | `-l`  | flag   |         | List available network interfaces and exit.                                                      |
+
+libpcap buffer sizing and immediate mode are configured through the `[capture]` section of the config file.
+
+### Output Options
+
+| Flag                           | Short | Type  | Default | Description                                                                                                         |
+| ------------------------------ | ----- | ----- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `--hex-dump`                   |       | flag  | off     | Show detailed per-packet output with a hex-dump preview.                                                            |
+| `--no-hex-dump`                |       | flag  |         | Disable hex dump output.                                                                                            |
+| `--quiet`                      |       | flag  | off     | Suppress per-packet terminal output. Useful for stats-only or web-only runs.                                        |
+| `--no-quiet`                   |       | flag  |         | Re-enable per-packet output (overrides config file).                                                                |
+| `--verbose`                    | `-v`  | count | 0       | Increase verbosity. `-v` = INFO, `-vv` = DEBUG, `-vvv` = TRACE.                                                     |
+| `--write-pcap <PATH>`          |       | path  | (none)  | Write captured packets to a pcap file.                                                                              |
+| `--write-pcap-rotate-mb <MB>`  |       | int   | 0       | Rotate pcap output when a segment reaches this many MiB. Requires `--write-pcap` + `--write-pcap-max-files`.        |
+| `--write-pcap-max-files <N>`   |       | int   | 0       | Keep only the newest `N` rotated pcap segments (delete oldest). Requires `--write-pcap` + `--write-pcap-rotate-mb`. |
+| `--export-json <PATH>`         |       | path  | (none)  | Export the flow table to JSON on exit.                                                                              |
+| `--export-csv <PATH>`          |       | path  | (none)  | Export the flow table to CSV on exit.                                                                               |
+| `--summary-json <PATH>`        |       | path  | (none)  | Write versioned final run accounting as JSON after workers and outputs finish.                                      |
+| `--expired-flows-jsonl <PATH>` |       | path  | (none)  | Write expired/evicted flow records as JSON lines (inline and pipeline modes).                                       |
+| `--expired-flows-csv <PATH>`   |       | path  | (none)  | Write expired/evicted flow records as streaming CSV (inline and pipeline modes).                                    |
+
+When rotation is enabled, `--write-pcap` is treated as a base template and NetScope writes numbered segments like `capture.000001.pcap`, `capture.000002.pcap`, and so on (the unsuffixed `capture.pcap` file is not created).
+
+The `--summary-json` file uses schema version 1 and records final packet, pipeline, flow, alert, drop, timing, and output-error accounting. Pipeline-only counters are `null` in inline mode; live kernel/interface counters are `null` for offline input or when unavailable. Malformed transport headers can be partially parsed and counted in `malformed_or_unsupported_packets`. Output errors make the command exit unsuccessfully. The full Phase 1 field contract is in [Phase 1 implementation details](#phase-1-implementation-details).
+
+Note: verbosity level `-vv` or higher also enables detailed per-packet output even if `--hex-dump` is not set.
+
+### Stats Options
+
+| Flag                       | Type | Default | Description                                                       |
+| -------------------------- | ---- | ------- | ----------------------------------------------------------------- |
+| `--stats`                  | flag | off     | Enable periodic throughput stats printed to stdout.               |
+| `--no-stats`               | flag |         | Disable periodic stats.                                           |
+| `--stats-interval-ms <MS>` | int  | 1000    | How often to print stats (milliseconds).                          |
+| `--top-flows <N>`          | int  | 0       | Number of top flows (by bandwidth delta) to show each stats tick. |
+
+### Flow Options
+
+| Flag                      | Type  | Default | Description                                                                                            |
+| ------------------------- | ----- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `--flow-timeout-s <SECS>` | float | 60.0    | Flow inactivity timeout in seconds. Flows with no traffic for this long are expired. 0 = never expire. |
+| `--max-flows <N>`         | int   | 100000  | Maximum number of tracked flows. When exceeded, the oldest flows are evicted. 0 = unlimited.           |
+
+### Anomaly Detection
+
+| Flag                    | Type | Default | Description                                                               |
+| ----------------------- | ---- | ------- | ------------------------------------------------------------------------- |
+| `--anomalies`           | flag | off     | Enable anomaly detection (SYN flood, port scan).                          |
+| `--no-anomalies`        | flag |         | Disable anomaly detection.                                                |
+| `--alerts-jsonl <PATH>` | path | (none)  | Write anomaly alerts as JSON lines to a file (inline and pipeline modes). |
+
+See [Anomaly Detection](anomaly-detection.md) for threshold configuration (requires a config file).
+
+### Web Dashboard
+
+| Flag                          | Type   | Default     | Description                                |
+| ----------------------------- | ------ | ----------- | ------------------------------------------ |
+| `--web`                       | flag   | off         | Enable the web dashboard.                  |
+| `--no-web`                    | flag   |             | Disable the web dashboard.                 |
+| `--web-bind <ADDR>`           | string | `127.0.0.1` | HTTP server bind address.                  |
+| `--web-port <PORT>`           | int    | 8080        | HTTP server port.                          |
+| `--web-tls`                   | flag   | off         | Enable HTTPS for the web dashboard.        |
+| `--no-web-tls`                | flag   |             | Disable HTTPS for the web dashboard.       |
+| `--web-tls-cert <PATH>`       | path   | (none)      | PEM certificate path for HTTPS serving.    |
+| `--web-tls-key <PATH>`        | path   | (none)      | PEM private key path for HTTPS serving.    |
+| `--web-auth`                  | flag   | off         | Enable HTTP Basic auth for the dashboard.  |
+| `--no-web-auth`               | flag   |             | Disable HTTP Basic auth for the dashboard. |
+| `--web-auth-user <USER>`      | string | (none)      | Username for HTTP Basic auth.              |
+| `--web-auth-pass-file <PATH>` | path   | (none)      | File containing HTTP Basic auth password.  |
+
+Tick cadence, packet sampling, packet-buffer sizing, payload truncation, and richer auth/TLS defaults can be configured through the `[web]`, `[web.tls]`, and `[web.auth]` sections.
+
+See [Web Dashboard](web-dashboard.md) for full details.
+
+### Pipeline Options
+
+| Flag            | Type | Default | Description                                                                                                                                                       |
+| --------------- | ---- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--pipeline`    | flag | off     | Enable the sharded pipeline for multi-core packet processing.                                                                                                     |
+| `--workers <N>` | int  | 0       | Number of pipeline worker threads. 0 = auto-detect (half of CPU count, clamped to 1..8). Setting `--workers` to a non-zero value implicitly enables `--pipeline`. |
+
+Queue sizing (`pipeline.channel_capacity`) is configured through the config file.
+
+See [Sharded Pipeline](pipeline.md) for architecture and tuning details.
+
+### General
+
+| Flag                    | Short | Description                                                                                                   |
+| ----------------------- | ----- | ------------------------------------------------------------------------------------------------------------- |
+| `--config <PATH>`       |       | Load a TOML configuration file. CLI flags override config values.                                             |
+| `--synthetic-flows <N>` |       | Insert `N` synthetic scale-mode flows and print memory stats, then exit. Useful for memory-budget validation. |
+| `--help`                | `-h`  | Print help text.                                                                                              |
+| `--version`             | `-V`  | Print version.                                                                                                |
+
+### Boolean Flag Pairs
+
+Several options come in `--flag` / `--no-flag` pairs. This lets you override config file values in either direction from the CLI:
+
+```bash
+# Config file has quiet = true, but you want per-packet output this time:
+sudo netscope --config my.toml --no-quiet
+
+# Config file has promiscuous = true, but you want to disable it:
+sudo netscope --config my.toml --no-promiscuous
+```
+
+Each pair is mutually exclusive -- specifying both `--flag` and `--no-flag` is an error.
+
+<a id="change-history"></a>
+## Appendix B — Change history
+
+This appendix preserves the complete release history formerly kept in `CHANGELOG.md`. New behavior, compatibility, and documentation changes belong here so the project has one consolidated plan and change record.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+### [Unreleased]
+
+#### Added
+
+- `--summary-json <PATH>` and `output.summary_json` for versioned final packet, flow, alert, drop, timing, and output-error accounting.
+- `--read-pcap <PATH>` and `capture.read_pcap` to analyze offline pcaps (supports BPF filters and can be paired with `--write-pcap` to rewrite pcaps).
+- Size-based rotation with bounded retention for pcap output (`--write-pcap`) via `--write-pcap-rotate-mb` / `--write-pcap-max-files` (and matching `[output]` config keys).
+- `--expired-flows-jsonl <PATH>` to continuously write expired/evicted flow records as JSONL during capture (includes `reason = timeout | eviction`).
+- `--expired-flows-csv <PATH>` to continuously write expired/evicted flow records as streaming CSV during capture (and matching `output.expired_flows_csv`).
+- Prometheus-compatible metrics endpoint at `/metrics` on the web dashboard server (shares web TLS/auth settings).
+- Live kernel/libpcap drop and interface drop deltas/totals in periodic stats ticks and the web dashboard.
+- DNS (UDP/53) decoding in CLI packet views and the web packet inspector.
+- TLS ClientHello SNI extraction in CLI packet views and the web packet inspector (best-effort, packet-level; no TCP reassembly; ECH can hide SNI).
+- ICMPv6 parsing in CLI packet views and the web packet inspector.
+- ARP parsing in CLI packet views and the web packet inspector.
+- QinQ (802.1ad) stacked VLAN support (TPID `0x88A8`) for double-tagged frames in CLI and web packet details.
+- Vendored Chart.js for the embedded web dashboard so charts render in offline/airgapped environments (no CDN runtime dependency).
+- Web dashboard hardening: optional HTTPS (`web.tls.*` / `--web-tls`) and HTTP Basic auth (`web.auth.*` / `--web-auth`).
+- Non-Ethernet packet parsing for Linux cooked capture (SLL), loopback NULL/LOOP, and raw IP datalink captures.
+- Development: pinned Rust toolchain via `rust-toolchain.toml` and added CI checks for formatting, clippy, and tests.
+
+#### Fixed
+
+- Malformed TCP/UDP transport headers retain partial link/network decoding and are counted as malformed instead of fully successful packets.
+- Avoid duplicate DNS parsing when building web packet summaries + details.
+- `--alerts-jsonl` now works in pipeline mode (single-writer JSONL output owned by the aggregator).
+- `--list-interfaces` no longer depends on successfully loading a config file.
+- Web packet detail lookups are resilient to out-of-order `PacketStored` events in pipeline mode.
+- Pipeline aggregator waits for all shard shutdown snapshots before exiting (prevents incomplete exports on Ctrl-C).
+- Pipeline aggregator stores final snapshots by shard id and replaces duplicate shutdown snapshots deterministically.
+- Web ingest flushes buffered packet samples/alerts on shutdown to avoid dropping the final partial interval.
+- Static file handler returns 404 for unknown `/api/*` paths instead of serving the SPA fallback.
+- IPv6 shard routing walks common extension headers so flows consistently hash to the same shard.
+- Shard routing now honors non-Ethernet datalink offsets (SLL, loopback, raw IP) so flow hashing remains stable in pipeline mode.
+- Pipeline capture now always shuts down worker/aggregator threads before returning, including pcap write/flush error paths.
+- Pipeline errors now preserve the aggregator's output failure when worker dispatch also reports a disconnect.
+- IPv6 non-initial fragments are no longer treated as transport-bearing packets for flow/anomaly tracking and shard port hashing.
+- Compact flow keys no longer silently accept unexpected IP protocol numbers (logs a one-time warning and defaults to TCP; debug builds assert).
+
+#### Changed
+
+- Pipeline `flow.max_flows` is now divided across shards; actual worker count is reduced when needed to keep the configured total budget.
+- Offline pipeline processing now waits for worker queue space instead of dropping frames; live capture remains nonblocking and counts dispatch drops.
+- Clarified configuration fields and streamlined CLI documentation examples.
+- Documentation now includes `/metrics` scrape examples and notes that it shares the web dashboard TLS/auth settings.
+- Restored technical limitations and prerequisites to project documentation.
+- Refined tuning guides regarding web dashboard performance and memory optimization.
+- Pcap output now flushes periodically and on shutdown; flush failures abort capture instead of silently continuing.
+- IPv6 parsing now walks common extension headers to expose the effective transport protocol and payload offset.
+- IPv6 extension-header walk depth increased (bounded) to cover deeper valid chains.
+- Packet detail store now uses fixed-size O(1) slot storage keyed by packet id modulo capacity, with stale-id rejection outside the active window.
+- Local perf validation is now captured via `scripts/perf/validate.sh` (release build + representative benchmark + CLI synthetic-flow memory validation).
+- Internal refactors to improve maintainability (flow module split, shared output sinks, shared packet formatting helpers).
+- Flow CSV export avoids per-row string allocations by writing fields directly.
+- Perf helper scripts print `tcpreplay` install hints and removed stale accepted-baseline text.
+
+#### Removed
+
+- Removed low-signal and perf/size guard tests (including the ignored 1M-flow RSS budget test and layout size assertions).
+
+### [0.2.0] - 2026-03-15
+
+#### Added
+
+- Criterion benchmark `handshake_sequence` for TCP 3-way handshake hot path measurement
+- Dashboard usability and performance improvements
+- Synthetic memory benchmark and scale-mode regression fixes
+- Phase 4 scale-mode storage with compact IPv4/IPv6 flow tables
+- Frame sequencing, rAF rendering with performance overlay, and streaming heavy-hitters with exact deltas
+- PCap configuration knobs, buffer pool, drop statistics, and aggregator deadline
+- Pre-sized flow table allocation based on `flow.max_flows` to reduce hash map resizes
+- RTT optimization removing per-call heap allocation by streaming samples from ACK handling
+- Comprehensive documentation updates and .gitignore improvements
+
+#### Changed
+
+- Documentation refresh clarifying web, config, and performance sections
+- Updated CLI vs config-only documentation with examples
+- Linked Getting Started and Troubleshooting documentation pages
+- Removed perf-validation documentation (guidance moved to performance.md and scripts/perf/)
+- Closed validation targets and cleaned up related documentation
+- Added documentation for scale-mode flow storage and pipeline operation
+- Batched per-tick events into merged frame messages; decoupled CLI and web top-flows
+- Added documentation for streaming heavy-hitters and performance mode
+- Added capture buffer/immediate options and reordered imports
+- Honored web.tick_ms configuration; removed 500ms clamp, lowered receive timeout, added minimum validation
+- Reformatted documentation tables; removed CONTRIBUTING directory and index.md
+- Flow tracking switches to compact scale-mode store with split IPv4/IPv6 tables when advanced analysis disabled
+- Pipeline heavy-hitter tracking now uses compact internal flow-key path in scale mode
+- Pipeline-mode web updates use merged websocket `frame` messages with latest-frame replay
+- Pipeline-mode top-flow reporting decouples CLI `stats.top_flows` from dashboard `web.top_n`
+- Updated documentation for performance benchmarks and flow table sizing behavior
+- Refreshed documentation to reduce overlap between setup, usage, CLI, configuration, and feature guides
+
+#### Removed
+
+- `CONTRIBUTING.md`
+- `docs/index.md` (fully redundant with main README.md documentation table)
+- `docs/perf-validation.md` (guidance moved to performance.md and scripts/perf/)
+
+### [0.1.0] - 2026-02-27
+
+#### Added
+
+- Live packet capture via libpcap with BPF filter support.
+- Zero-copy protocol parsing for Ethernet II, 802.1Q VLAN, IPv4, IPv6, TCP, UDP, ICMP.
+- Bidirectional flow tracking with TCP state machine (SYN, SYN-ACK, Established, FIN, RST).
+- TCP analysis: RTT estimation (EWMA, alpha=0.125), retransmission detection, out-of-order segment detection.
+- Sharded pipeline for multi-core packet processing with lock-free per-shard flow tracking.
+- Shard routing via fast 5-tuple extraction from raw bytes (no full parse on capture thread).
+- Anomaly detection: SYN flood and port scan alerts with sliding windows and cooldowns.
+- Web dashboard with real-time throughput charts, top flows table, packet inspector, and alerts tab.
+- WebSocket protocol for live stats, sampled packets, packet detail requests, and alerts.
+- Frontend embedded in the binary via `rust-embed` (no external files needed).
+- TOML configuration file support with full CLI override (including `--no-*` flag pairs).
+- Flow export to JSON and CSV on capture exit.
+- Alert export to JSONL file.
+- Pcap file output (`--write-pcap`).
+- Periodic throughput stats with top-N flows by bandwidth delta.
+- Criterion benchmarks for parsing, flow tracking, and shard routing.
+- Comprehensive documentation in `docs/`.

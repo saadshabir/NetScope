@@ -1,0 +1,31 @@
+[
+  {
+    "protocol": "tcp",
+    "endpoint_a": {
+      "ip": "10.0.0.1",
+      "port": 12345
+    },
+    "endpoint_b": {
+      "ip": "10.0.0.2",
+      "port": 443
+    },
+    "first_seen": 1700000000.0,
+    "last_seen": 1700000000.001,
+    "duration_secs": 0.0009999275207519531,
+    "packets_a_to_b": 1,
+    "packets_b_to_a": 1,
+    "bytes_a_to_b": 54,
+    "bytes_b_to_a": 54,
+    "packets_total": 2,
+    "bytes_total": 108,
+    "avg_bps": 864062.626609442,
+    "tcp_state": "syn_ack",
+    "client": "ato_b",
+    "retransmissions": 0,
+    "out_of_order": 0,
+    "rtt_last_ms": 0.9999275207519531,
+    "rtt_min_ms": 0.9999275207519531,
+    "rtt_ewma_ms": 0.9999275207519531,
+    "rtt_samples": 1
+  }
+]

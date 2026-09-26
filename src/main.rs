@@ -1,5 +1,6 @@
 mod cli;
 
+use netscope::run_summary::{self, RunAccounting, RunSummary};
 use netscope::{
     analysis, capture, config, display, flow, memory, metrics, pipeline, protocol, web,
 };
@@ -194,8 +195,10 @@ fn run_capture(
     running: &Arc<AtomicBool>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     config.validate()?;
+    let run_start = Instant::now();
     let mut cap = open_capture_source(config)?;
     let link_type = protocol::LinkType::from_pcap_value(cap.get_datalink().0);
+    let capture_mode = cap.mode();
     let rotation_policy = PcapRotationPolicy::from_output(&config.output);
     let mut savefile = match &config.output.write_pcap {
         Some(path) => Some(RotatingSavefile::open(
@@ -205,15 +208,14 @@ fn run_capture(
         )?),
         None => None,
     };
-    let capture_mode = cap.mode();
-
     // Start web dashboard if enabled.
     let web_handle = start_web_dashboard(config)?;
 
     print_capture_intro(config, capture_mode)?;
     println!("Datalink: {}", link_type);
 
-    if config.pipeline.enabled {
+    let mut accounting = RunAccounting::default();
+    let processing_result = if config.pipeline.enabled {
         run_capture_pipeline(
             config,
             running,
@@ -221,7 +223,8 @@ fn run_capture(
             &mut cap,
             savefile.as_mut(),
             web_handle.as_ref(),
-        )?;
+            &mut accounting,
+        )
     } else {
         run_capture_inline(
             config,
@@ -230,14 +233,157 @@ fn run_capture(
             &mut cap,
             savefile.as_mut(),
             web_handle.as_ref(),
-        )?;
+            &mut accounting,
+        )
+    };
+
+    match cap.stats() {
+        Ok(Some(stats)) => {
+            accounting.kernel_drops = Some(stats.dropped as u64);
+            accounting.interface_drops = Some(stats.if_dropped as u64);
+        }
+        Ok(None) => {}
+        Err(err) => tracing::debug!(error = %err, "failed to read final pcap stats"),
     }
 
-    print_kernel_capture_stats(&mut cap);
+    let output_errors = accounting.output_errors.clone();
+    let status = if processing_result.is_err() || !output_errors.is_empty() {
+        "failed"
+    } else if !running.load(Ordering::SeqCst) {
+        "interrupted"
+    } else {
+        "success"
+    };
+    let mode = if config.pipeline.enabled {
+        "pipeline"
+    } else {
+        "inline"
+    };
+    let source = run_summary::source_description(
+        config.capture.read_pcap.as_deref(),
+        config.capture.interface.as_deref(),
+    );
+    let effective_config = run_summary::effective_config(run_summary::EffectiveConfigInput {
+        capture: &config.capture,
+        flow: &config.flow,
+        packet_limit: config.run.count,
+        analysis: &config.analysis,
+        output: &config.output,
+        stats: &config.stats,
+        web: &config.web,
+        pipeline_enabled: config.pipeline.enabled,
+        requested_workers: config.pipeline.workers,
+        pipeline_channel_capacity: config.pipeline.channel_capacity,
+        link_type,
+    });
+    let summary = RunSummary::new(
+        mode,
+        source,
+        run_start.elapsed().as_secs_f64(),
+        status,
+        processing_result.as_ref().err().map(ToString::to_string),
+        effective_config,
+        accounting.clone(),
+    );
+
+    print_run_summary(&summary);
+    if let Some(path) = config.output.summary_json.as_deref() {
+        run_summary::write_json(path, &summary).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!("failed to write run summary '{}': {}", path.display(), err),
+            )
+        })?;
+    }
 
     println!("{}", "=".repeat(50));
 
+    processing_result?;
+    if !summary.output_errors.is_empty() {
+        return Err(std::io::Error::other(format!(
+            "{} output error(s) occurred; see the run summary",
+            summary.output_errors.len()
+        ))
+        .into());
+    }
     Ok(())
+}
+
+fn print_run_summary(summary: &RunSummary) {
+    println!();
+    println!("{}", "=".repeat(50));
+    if summary.mode == "pipeline" {
+        println!(
+            "Capture complete (pipeline mode; status: {}).",
+            summary.status
+        );
+    } else {
+        println!("Capture complete (status: {}).", summary.status);
+    }
+    println!("  Packets captured:  {}", summary.frames_read);
+    println!("  Input wire bytes:   {}", summary.input_wire_bytes);
+    println!("  Packets parsed:     {}", summary.packets_parsed);
+    println!(
+        "  Transport headers:  {}",
+        summary.packets_with_transport_header
+    );
+    println!(
+        "  Malformed/unsupported: {}",
+        summary.malformed_or_unsupported_packets
+    );
+    if let Some(dispatched) = summary.dispatched_frames {
+        println!("  Dispatched frames:  {}", dispatched);
+        println!(
+            "  Dispatch drops:    {}",
+            summary.dispatch_drops.unwrap_or(0)
+        );
+        println!(
+            "  Worker processed:   {}",
+            summary.worker_processed_frames.unwrap_or(0)
+        );
+        println!(
+            "  Worker failures:    {}",
+            summary.worker_failures.unwrap_or(0)
+        );
+    } else {
+        println!(
+            "  Parse errors:      {}",
+            summary.malformed_or_unsupported_packets
+        );
+        println!(
+            "  Success rate:       {:.1}%",
+            if summary.frames_read > 0 {
+                (summary.frames_read - summary.malformed_or_unsupported_packets) as f64
+                    / summary.frames_read as f64
+                    * 100.0
+            } else {
+                0.0
+            }
+        );
+    }
+    println!("  Flows created:      {}", summary.flows_created);
+    println!("  Flows expired:      {}", summary.flows_expired);
+    println!("  Flows evicted:      {}", summary.flows_evicted);
+    println!("  Alerts emitted:     {}", summary.alerts_emitted);
+    println!("  Elapsed:            {:.3}s", summary.elapsed_wall_seconds);
+    println!(
+        "  Kernel/interface drops: {}/{}",
+        summary
+            .kernel_drops
+            .map_or_else(|| "unavailable".into(), |value| value.to_string()),
+        summary
+            .interface_drops
+            .map_or_else(|| "unavailable".into(), |value| value.to_string())
+    );
+    if !summary.output_errors.is_empty() {
+        println!("  Output errors:      {}", summary.output_errors.len());
+        for error in &summary.output_errors {
+            println!("    - {error}");
+        }
+    }
+    if let Some(error) = &summary.run_error {
+        println!("  Run error:          {error}");
+    }
 }
 
 fn open_capture_source(
@@ -367,24 +513,6 @@ fn print_capture_intro(
         }
     }
     Ok(())
-}
-
-fn print_kernel_capture_stats(cap: &mut CaptureSource) {
-    match cap.stats() {
-        Ok(Some(stats)) => {
-            println!("  Kernel received:   {}", stats.received);
-            println!("  Kernel dropped:    {}", stats.dropped);
-            println!("  Interface dropped: {}", stats.if_dropped);
-            if stats.received > 0 {
-                let drop_pct = (stats.dropped as f64 / stats.received as f64) * 100.0;
-                println!("  Drop rate:         {:.2}%", drop_pct);
-            }
-        }
-        Ok(None) => {}
-        Err(e) => {
-            tracing::debug!(error = %e, "failed to read pcap stats");
-        }
-    }
 }
 
 const SAVEFILE_FLUSH_INTERVAL_PACKETS: u64 = 1024;
@@ -623,6 +751,97 @@ fn flush_savefile(savefile: &mut Option<&mut RotatingSavefile>) -> Result<(), pc
     Ok(())
 }
 
+struct PipelinePacketDispatcher<'a> {
+    capture_mode: CaptureMode,
+    link_type: protocol::LinkType,
+    senders: &'a [crossbeam_channel::Sender<pipeline::OwnedPacket>],
+    buffer_pool: &'a pipeline::PacketBufPool,
+    stats: &'a pipeline::PipelineStats,
+}
+
+impl PipelinePacketDispatcher<'_> {
+    fn write_and_dispatch(
+        &self,
+        packet: &pcap::Packet<'_>,
+        packet_count: u64,
+        savefile: &mut Option<&mut RotatingSavefile>,
+        accounting: &mut RunAccounting,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if let Err(err) = write_packet_to_savefile(savefile, packet, packet_count) {
+            tracing::error!(error = %err, "pcap write error");
+            accounting
+                .output_errors
+                .push(format!("pcap write error: {err}"));
+            self.record_dispatch_drop(accounting);
+            return Err(Box::new(err));
+        }
+
+        let timestamp =
+            packet.header.ts.tv_sec as f64 + packet.header.ts.tv_usec as f64 / 1_000_000.0;
+        let wire_len = packet.header.len as u64;
+        let shard = pipeline::router::shard_for_packet_with_linktype(
+            packet.data,
+            self.senders.len(),
+            self.link_type,
+        );
+        let mut buf = self.buffer_pool.acquire();
+        buf.extend_from_slice(packet.data);
+        let owned = pipeline::OwnedPacket {
+            id: packet_count,
+            ts: timestamp,
+            wire_len,
+            data: buf,
+        };
+
+        match self.capture_mode {
+            CaptureMode::Offline => {
+                if let Err(err) = self.senders[shard].send(owned) {
+                    let dropped = err.0;
+                    self.buffer_pool.release(dropped.data);
+                    self.record_dispatch_drop(accounting);
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        format!(
+                            "pipeline worker {} stopped before offline packet {} was dispatched",
+                            shard, packet_count
+                        ),
+                    )
+                    .into());
+                }
+                accounting.dispatched_frames =
+                    Some(accounting.dispatched_frames.unwrap_or(0).saturating_add(1));
+            }
+            CaptureMode::Live => match self.senders[shard].try_send(owned) {
+                Ok(_) => {
+                    accounting.dispatched_frames =
+                        Some(accounting.dispatched_frames.unwrap_or(0).saturating_add(1));
+                }
+                Err(crossbeam_channel::TrySendError::Full(dropped)) => {
+                    self.record_dispatch_drop(accounting);
+                    self.buffer_pool.release(dropped.data);
+                    tracing::trace!(shard, "worker channel full, dropping live packet");
+                }
+                Err(crossbeam_channel::TrySendError::Disconnected(dropped)) => {
+                    self.record_dispatch_drop(accounting);
+                    self.buffer_pool.release(dropped.data);
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        format!("pipeline worker {} stopped during live capture", shard),
+                    )
+                    .into());
+                }
+            },
+        }
+
+        Ok(())
+    }
+
+    fn record_dispatch_drop(&self, accounting: &mut RunAccounting) {
+        self.stats.record_dispatch_drop();
+        accounting.dispatch_drops = Some(accounting.dispatch_drops.unwrap_or(0).saturating_add(1));
+    }
+}
+
 #[derive(Debug, Default)]
 struct InlineKernelStats {
     dropped_total: u64,
@@ -727,6 +946,28 @@ fn flush_expired_flows(
     sinks.write_events(&drained)
 }
 
+fn flush_expired_flows_accounted(
+    output_sinks: &mut sinks::OutputSinks,
+    events: &mut Vec<flow::ExpiredFlowEvent>,
+    accounting: &mut RunAccounting,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match flush_expired_flows(&mut output_sinks.expired_flows, events) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            accounting.output_errors.extend(output_sinks.take_errors());
+            accounting.output_errors.push(err.to_string());
+            Err(Box::new(err))
+        }
+    }
+}
+
+fn sync_flow_accounting(accounting: &mut RunAccounting, tracker: &flow::FlowTracker) {
+    let stats = tracker.stats();
+    accounting.flows_created = stats.created;
+    accounting.flows_expired = stats.expired;
+    accounting.flows_evicted = stats.evicted;
+}
+
 /// Original single-threaded capture loop (no pipeline).
 fn run_capture_inline(
     config: &RuntimeConfig,
@@ -735,11 +976,11 @@ fn run_capture_inline(
     cap: &mut CaptureSource,
     mut savefile: Option<&mut RotatingSavefile>,
     web_handle: Option<&web::server::WebHandle>,
+    accounting: &mut RunAccounting,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     let mut packet_count: u64 = 0;
-    let mut parse_errors: u64 = 0;
     let mut flow_tracker = flow::FlowTracker::new(
         config.flow.timeout_secs,
         config.flow.max_flows,
@@ -778,305 +1019,368 @@ fn run_capture_inline(
     let mut web_tick_packets: u64 = 0;
     let mut web_frame_seq: u64 = 0;
 
-    while running.load(Ordering::SeqCst) {
-        // Check packet count limit
-        if config.run.count > 0 && packet_count >= config.run.count {
-            break;
-        }
-
-        if let Err(err) = maybe_rotate_savefile(cap, &mut savefile) {
-            tracing::error!(error = %err, "pcap rotate error");
-            return Err(Box::new(err));
-        }
-
-        // Read next packet
-        let packet = match cap.next_packet() {
-            Ok(CaptureRead::Packet(packet)) => Some(packet),
-            Ok(CaptureRead::Idle) => None,
-            Ok(CaptureRead::Eof) => break,
-            Err(e) => {
-                tracing::error!(error = %e, "capture error");
-                return Err(Box::new(e));
+    let capture_result = (|| -> Result<(), Box<dyn std::error::Error>> {
+        while running.load(Ordering::SeqCst) {
+            // Check packet count limit
+            if config.run.count > 0 && packet_count >= config.run.count {
+                break;
             }
-        };
 
-        if let Some(packet) = packet {
-            packet_count += 1;
-
-            let timestamp =
-                packet.header.ts.tv_sec as f64 + packet.header.ts.tv_usec as f64 / 1_000_000.0;
-            let raw_data = packet.data;
-            let wire_len = packet.header.len as u64;
-
-            if let Err(err) = write_packet_to_savefile(&mut savefile, &packet, packet_count) {
-                tracing::error!(error = %err, "pcap write error");
+            if let Err(err) = maybe_rotate_savefile(cap, &mut savefile) {
+                tracing::error!(error = %err, "pcap rotate error");
                 return Err(Box::new(err));
             }
 
-            // Parse the packet
-            match protocol::parse_packet_with_linktype(raw_data, link_type) {
-                Ok(parsed) => {
-                    if config.analysis.anomalies.enabled {
-                        let alerts =
-                            maybe_analyze_anomaly(&mut anomaly_detector, timestamp, &parsed)?;
-                        for alert in &alerts {
-                            output_sinks.write_alert(
-                                alert.ts,
-                                alert.kind.as_str(),
-                                &alert.description,
-                            )?;
-                            println!("[alert] {}", alert.description);
-                            // Forward alerts to web dashboard
-                            if let Some(handle) = web_handle
-                                && handle
-                                    .event_tx
-                                    .try_send(web::messages::CaptureEvent::Alert(
-                                        web::messages::AlertMsg {
-                                            ts: alert.ts,
-                                            kind: alert.kind.as_str().to_string(),
-                                            description: alert.description.clone(),
-                                        },
-                                    ))
-                                    .is_err()
-                            {
-                                tracing::trace!("web event channel full, dropping alert");
+            // Read next packet
+            let packet = match cap.next_packet() {
+                Ok(CaptureRead::Packet(packet)) => Some(packet),
+                Ok(CaptureRead::Idle) => None,
+                Ok(CaptureRead::Eof) => break,
+                Err(e) => {
+                    tracing::error!(error = %e, "capture error");
+                    return Err(Box::new(e));
+                }
+            };
+
+            if let Some(packet) = packet {
+                packet_count += 1;
+                accounting.frames_read = packet_count;
+
+                let timestamp =
+                    packet.header.ts.tv_sec as f64 + packet.header.ts.tv_usec as f64 / 1_000_000.0;
+                let raw_data = packet.data;
+                let wire_len = packet.header.len as u64;
+                accounting.input_wire_bytes = accounting.input_wire_bytes.saturating_add(wire_len);
+
+                if let Err(err) = write_packet_to_savefile(&mut savefile, &packet, packet_count) {
+                    tracing::error!(error = %err, "pcap write error");
+                    accounting
+                        .output_errors
+                        .push(format!("pcap write error: {err}"));
+                    return Err(Box::new(err));
+                }
+
+                // Parse the packet
+                match protocol::parse_packet_with_linktype(raw_data, link_type) {
+                    Ok(parsed) => {
+                        accounting.packets_parsed = accounting.packets_parsed.saturating_add(1);
+                        if parsed.transport.is_some() {
+                            accounting.packets_with_transport_header =
+                                accounting.packets_with_transport_header.saturating_add(1);
+                        }
+                        if parsed.transport_parse_error.is_some() || parsed.unsupported {
+                            accounting.malformed_or_unsupported_packets = accounting
+                                .malformed_or_unsupported_packets
+                                .saturating_add(1);
+                        }
+                        if let Some(err) = parsed.transport_parse_error.as_ref() {
+                            tracing::debug!(error = %err, "malformed transport header on packet #{}", packet_count);
+                        }
+                        if config.analysis.anomalies.enabled {
+                            let alerts =
+                                maybe_analyze_anomaly(&mut anomaly_detector, timestamp, &parsed)?;
+                            accounting.alerts_emitted = accounting
+                                .alerts_emitted
+                                .saturating_add(alerts.len() as u64);
+                            for alert in &alerts {
+                                if let Err(err) = output_sinks.write_alert(
+                                    alert.ts,
+                                    alert.kind.as_str(),
+                                    &alert.description,
+                                ) {
+                                    accounting.output_errors.extend(output_sinks.take_errors());
+                                    accounting.output_errors.push(err.to_string());
+                                    return Err(Box::new(err));
+                                }
+                                println!("[alert] {}", alert.description);
+                                // Forward alerts to web dashboard
+                                if let Some(handle) = web_handle
+                                    && handle
+                                        .event_tx
+                                        .try_send(web::messages::CaptureEvent::Alert(
+                                            web::messages::AlertMsg {
+                                                ts: alert.ts,
+                                                kind: alert.kind.as_str().to_string(),
+                                                description: alert.description.clone(),
+                                            },
+                                        ))
+                                        .is_err()
+                                {
+                                    tracing::trace!("web event channel full, dropping alert");
+                                }
                             }
                         }
-                    }
-                    flow_tracker.observe(timestamp, wire_len, &parsed);
+                        flow_tracker.observe(timestamp, wire_len, &parsed);
+                        sync_flow_accounting(accounting, &flow_tracker);
 
-                    // Send packet samples to web dashboard.
-                    if let Some(handle) = web_handle
-                        && config.web.sample_rate > 0
-                        && packet_count.is_multiple_of(config.web.sample_rate)
-                    {
-                        let (sample, stored) = build_packet_data(
-                            packet_count,
-                            timestamp,
-                            raw_data,
-                            &parsed,
-                            config.web.payload_bytes,
-                        );
-                        if handle
-                            .event_tx
-                            .try_send(web::messages::CaptureEvent::Packet(sample))
-                            .is_err()
+                        // Send packet samples to web dashboard.
+                        if let Some(handle) = web_handle
+                            && config.web.sample_rate > 0
+                            && packet_count.is_multiple_of(config.web.sample_rate)
                         {
-                            tracing::trace!("web event channel full, dropping packet sample");
+                            let (sample, stored) = build_packet_data(
+                                packet_count,
+                                timestamp,
+                                raw_data,
+                                &parsed,
+                                config.web.payload_bytes,
+                            );
+                            if handle
+                                .event_tx
+                                .try_send(web::messages::CaptureEvent::Packet(sample))
+                                .is_err()
+                            {
+                                tracing::trace!("web event channel full, dropping packet sample");
+                            }
+                            if handle
+                                .event_tx
+                                .try_send(web::messages::CaptureEvent::PacketStored(stored))
+                                .is_err()
+                            {
+                                tracing::trace!("web event channel full, dropping stored packet");
+                            }
                         }
-                        if handle
-                            .event_tx
-                            .try_send(web::messages::CaptureEvent::PacketStored(stored))
-                            .is_err()
-                        {
-                            tracing::trace!("web event channel full, dropping stored packet");
+
+                        if config.output.hex_dump || config.verbose_level >= 2 {
+                            display::print_packet_detail(
+                                packet_count,
+                                timestamp,
+                                raw_data,
+                                &parsed,
+                            );
+                        } else if !config.output.quiet {
+                            display::print_packet_summary(packet_count, timestamp, &parsed);
                         }
                     }
-
-                    if config.output.hex_dump || config.verbose_level >= 2 {
-                        display::print_packet_detail(packet_count, timestamp, raw_data, &parsed);
-                    } else if !config.output.quiet {
-                        display::print_packet_summary(packet_count, timestamp, &parsed);
+                    Err(e) => {
+                        accounting.malformed_or_unsupported_packets = accounting
+                            .malformed_or_unsupported_packets
+                            .saturating_add(1);
+                        display::print_parse_error(packet_count, timestamp, raw_data.len(), &e);
+                        tracing::debug!(error = %e, "parse error on packet #{}", packet_count);
                     }
                 }
-                Err(e) => {
-                    parse_errors += 1;
-                    display::print_parse_error(packet_count, timestamp, raw_data.len(), &e);
-                    tracing::debug!(error = %e, "parse error on packet #{}", packet_count);
+
+                stats_bytes += wire_len;
+                stats_packets += 1;
+                web_tick_bytes += wire_len;
+                web_tick_packets += 1;
+
+                if timestamp < last_expire_check_ts {
+                    last_expire_check_ts = timestamp;
+                } else if (timestamp - last_expire_check_ts) >= 1.0 {
+                    last_expire_check_ts = timestamp;
+                    if emit_expired_flows {
+                        flow_tracker.maybe_expire_collect(timestamp, &mut expired_flow_events);
+                        flush_expired_flows_accounted(
+                            &mut output_sinks,
+                            &mut expired_flow_events,
+                            accounting,
+                        )?;
+                    } else {
+                        flow_tracker.maybe_expire(timestamp);
+                    }
+                }
+            } else {
+                let now_ts = unix_secs_now();
+                if now_ts < last_expire_check_ts {
+                    last_expire_check_ts = now_ts;
+                } else if (now_ts - last_expire_check_ts) >= 1.0 {
+                    last_expire_check_ts = now_ts;
+                    if emit_expired_flows {
+                        flow_tracker.maybe_expire_collect(now_ts, &mut expired_flow_events);
+                        flush_expired_flows_accounted(
+                            &mut output_sinks,
+                            &mut expired_flow_events,
+                            accounting,
+                        )?;
+                    } else {
+                        flow_tracker.maybe_expire(now_ts);
+                    }
                 }
             }
 
-            stats_bytes += wire_len;
-            stats_packets += 1;
-            web_tick_bytes += wire_len;
-            web_tick_packets += 1;
-
-            if timestamp < last_expire_check_ts {
-                last_expire_check_ts = timestamp;
-            } else if (timestamp - last_expire_check_ts) >= 1.0 {
-                last_expire_check_ts = timestamp;
-                if emit_expired_flows {
-                    flow_tracker.maybe_expire_collect(timestamp, &mut expired_flow_events);
-                    flush_expired_flows(&mut output_sinks.expired_flows, &mut expired_flow_events)?;
-                } else {
-                    flow_tracker.maybe_expire(timestamp);
-                }
-            }
-        } else {
-            let now_ts = unix_secs_now();
-            if now_ts < last_expire_check_ts {
-                last_expire_check_ts = now_ts;
-            } else if (now_ts - last_expire_check_ts) >= 1.0 {
-                last_expire_check_ts = now_ts;
-                if emit_expired_flows {
-                    flow_tracker.maybe_expire_collect(now_ts, &mut expired_flow_events);
-                    flush_expired_flows(&mut output_sinks.expired_flows, &mut expired_flow_events)?;
-                } else {
-                    flow_tracker.maybe_expire(now_ts);
-                }
-            }
-        }
-
-        if let Some(last_poll) = live_stats_poll_last.as_mut()
-            && let Some((dropped_total, if_dropped_total)) =
-                maybe_poll_live_pcap_stats(cap, last_poll)
-        {
-            kernel_stats.update_totals(dropped_total, if_dropped_total);
-        }
-
-        // Stats printing
-        let now = Instant::now();
-        if config.stats.enabled
-            && now.duration_since(stats_last).as_millis() as u64 >= config.stats.interval_ms
-        {
-            let elapsed = now.duration_since(stats_last).as_secs_f64().max(0.001);
-            let mbps = stats_bytes as f64 * 8.0 / elapsed / 1_000_000.0;
-            let pps = stats_packets as f64 / elapsed;
-            let active_flows = flow_tracker.len();
-            let (kernel_drops, kernel_if_drops) = kernel_stats.take_stats_interval();
-            let kernel_snapshot = PcapDropSnapshot {
-                dropped_total: kernel_stats.dropped_total,
-                if_dropped_total: kernel_stats.if_dropped_total,
-            };
-            println!(
-                "[stats] {:.2} Mbps | {:.0} pps | {} flows | kdrop={} (total={}) ifdrop={} (total={})",
-                mbps,
-                pps,
-                active_flows,
-                kernel_drops,
-                kernel_snapshot.dropped_total,
-                kernel_if_drops,
-                kernel_snapshot.if_dropped_total
-            );
-
-            if config.stats.top_flows > 0 {
-                let top = flow_tracker.top_flows_by_delta(config.stats.top_flows as usize);
-                for (rank, entry) in top.iter().enumerate() {
-                    let mbps = entry.delta_bytes as f64 * 8.0 / elapsed / 1_000_000.0;
-                    println!("  {}. {} {:.2} Mbps", rank + 1, entry.key, mbps);
-                }
+            if let Some(last_poll) = live_stats_poll_last.as_mut()
+                && let Some((dropped_total, if_dropped_total)) =
+                    maybe_poll_live_pcap_stats(cap, last_poll)
+            {
+                kernel_stats.update_totals(dropped_total, if_dropped_total);
             }
 
-            stats_last = now;
-            stats_bytes = 0;
-            stats_packets = 0;
-        }
-
-        // Web dashboard tick
-        if let Some(handle) = web_handle {
+            // Stats printing
             let now = Instant::now();
-            if now.duration_since(web_tick_last).as_millis() as u64 >= config.web.tick_ms {
-                let elapsed = now.duration_since(web_tick_last).as_secs_f64().max(0.001);
-                let mbps = web_tick_bytes as f64 * 8.0 / elapsed / 1_000_000.0;
-                let pps = web_tick_packets as f64 / elapsed;
+            if config.stats.enabled
+                && now.duration_since(stats_last).as_millis() as u64 >= config.stats.interval_ms
+            {
+                let elapsed = now.duration_since(stats_last).as_secs_f64().max(0.001);
+                let mbps = stats_bytes as f64 * 8.0 / elapsed / 1_000_000.0;
+                let pps = stats_packets as f64 / elapsed;
                 let active_flows = flow_tracker.len();
-
-                let top_deltas = flow_tracker.top_flows_with_snapshot(config.web.top_n);
-                let top_flows: Vec<web::messages::FlowInfo> = top_deltas
-                    .iter()
-                    .map(|(delta, snap)| {
-                        web::messages::FlowInfo::from_snapshot_delta(
-                            snap,
-                            delta.delta_bytes,
-                            elapsed,
-                        )
-                    })
-                    .collect();
-                let (kernel_drops, kernel_if_drops) = kernel_stats.take_web_interval();
+                let (kernel_drops, kernel_if_drops) = kernel_stats.take_stats_interval();
                 let kernel_snapshot = PcapDropSnapshot {
                     dropped_total: kernel_stats.dropped_total,
                     if_dropped_total: kernel_stats.if_dropped_total,
                 };
-                let kernel_delta = PcapDropDelta {
-                    dropped: kernel_drops,
-                    if_dropped: kernel_if_drops,
-                };
-
-                metrics::observe_tick(
-                    web_tick_bytes,
-                    web_tick_packets,
-                    active_flows,
-                    0,
-                    kernel_delta.dropped,
-                    kernel_delta.if_dropped,
-                );
-
-                let tick = web::messages::StatsTick {
-                    ts: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs_f64(),
-                    frame_seq: web_frame_seq,
-                    server_ts: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
-                    interval_ms: config.web.tick_ms,
-                    bytes: web_tick_bytes,
-                    packets: web_tick_packets,
+                println!(
+                    "[stats] {:.2} Mbps | {:.0} pps | {} flows | kdrop={} (total={}) ifdrop={} (total={})",
                     mbps,
                     pps,
                     active_flows,
-                    dispatch_drops: 0,
-                    dispatch_drops_total: 0,
-                    kernel_drops: kernel_delta.dropped,
-                    kernel_drops_total: kernel_snapshot.dropped_total,
-                    kernel_if_drops: kernel_delta.if_dropped,
-                    kernel_if_drops_total: kernel_snapshot.if_dropped_total,
-                    top_flows,
-                };
+                    kernel_drops,
+                    kernel_snapshot.dropped_total,
+                    kernel_if_drops,
+                    kernel_snapshot.if_dropped_total
+                );
 
-                if handle
-                    .event_tx
-                    .try_send(web::messages::CaptureEvent::Tick(tick))
-                    .is_err()
-                {
-                    tracing::trace!("web event channel full, dropping stats tick");
+                if config.stats.top_flows > 0 {
+                    let top = flow_tracker.top_flows_by_delta(config.stats.top_flows as usize);
+                    for (rank, entry) in top.iter().enumerate() {
+                        let mbps = entry.delta_bytes as f64 * 8.0 / elapsed / 1_000_000.0;
+                        println!("  {}. {} {:.2} Mbps", rank + 1, entry.key, mbps);
+                    }
                 }
 
-                web_frame_seq = web_frame_seq.wrapping_add(1);
+                stats_last = now;
+                stats_bytes = 0;
+                stats_packets = 0;
+            }
 
-                web_tick_last = now;
-                web_tick_bytes = 0;
-                web_tick_packets = 0;
+            // Web dashboard tick
+            if let Some(handle) = web_handle {
+                let now = Instant::now();
+                if now.duration_since(web_tick_last).as_millis() as u64 >= config.web.tick_ms {
+                    let elapsed = now.duration_since(web_tick_last).as_secs_f64().max(0.001);
+                    let mbps = web_tick_bytes as f64 * 8.0 / elapsed / 1_000_000.0;
+                    let pps = web_tick_packets as f64 / elapsed;
+                    let active_flows = flow_tracker.len();
+
+                    let top_deltas = flow_tracker.top_flows_with_snapshot(config.web.top_n);
+                    let top_flows: Vec<web::messages::FlowInfo> = top_deltas
+                        .iter()
+                        .map(|(delta, snap)| {
+                            web::messages::FlowInfo::from_snapshot_delta(
+                                snap,
+                                delta.delta_bytes,
+                                elapsed,
+                            )
+                        })
+                        .collect();
+                    let (kernel_drops, kernel_if_drops) = kernel_stats.take_web_interval();
+                    let kernel_snapshot = PcapDropSnapshot {
+                        dropped_total: kernel_stats.dropped_total,
+                        if_dropped_total: kernel_stats.if_dropped_total,
+                    };
+                    let kernel_delta = PcapDropDelta {
+                        dropped: kernel_drops,
+                        if_dropped: kernel_if_drops,
+                    };
+
+                    metrics::observe_tick(
+                        web_tick_bytes,
+                        web_tick_packets,
+                        active_flows,
+                        0,
+                        kernel_delta.dropped,
+                        kernel_delta.if_dropped,
+                    );
+
+                    let tick = web::messages::StatsTick {
+                        ts: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs_f64(),
+                        frame_seq: web_frame_seq,
+                        server_ts: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_millis() as u64,
+                        interval_ms: config.web.tick_ms,
+                        bytes: web_tick_bytes,
+                        packets: web_tick_packets,
+                        mbps,
+                        pps,
+                        active_flows,
+                        dispatch_drops: 0,
+                        dispatch_drops_total: 0,
+                        kernel_drops: kernel_delta.dropped,
+                        kernel_drops_total: kernel_snapshot.dropped_total,
+                        kernel_if_drops: kernel_delta.if_dropped,
+                        kernel_if_drops_total: kernel_snapshot.if_dropped_total,
+                        top_flows,
+                    };
+
+                    if handle
+                        .event_tx
+                        .try_send(web::messages::CaptureEvent::Tick(tick))
+                        .is_err()
+                    {
+                        tracing::trace!("web event channel full, dropping stats tick");
+                    }
+
+                    web_frame_seq = web_frame_seq.wrapping_add(1);
+
+                    web_tick_last = now;
+                    web_tick_bytes = 0;
+                    web_tick_packets = 0;
+                }
             }
         }
-    }
+        Ok(())
+    })();
 
-    flush_expired_flows(&mut output_sinks.expired_flows, &mut expired_flow_events)?;
+    let mut final_error = capture_result.err().map(|err| err.to_string());
+    if let Err(err) =
+        flush_expired_flows_accounted(&mut output_sinks, &mut expired_flow_events, accounting)
+    {
+        final_error.get_or_insert_with(|| err.to_string());
+    }
+    sync_flow_accounting(accounting, &flow_tracker);
+    accounting.output_errors.extend(output_sinks.take_errors());
 
     if let Err(err) = flush_savefile(&mut savefile) {
         tracing::error!(error = %err, "pcap flush error");
-        return Err(Box::new(err));
+        accounting
+            .output_errors
+            .push(format!("pcap flush error: {err}"));
+        final_error.get_or_insert_with(|| err.to_string());
     }
-
-    // Print summary
-    println!();
-    println!("{}", "=".repeat(50));
-    println!("Capture complete.");
-    println!("  Packets captured:  {}", packet_count);
-    println!("  Parse errors:      {}", parse_errors);
-    println!(
-        "  Success rate:      {:.1}%",
-        if packet_count > 0 {
-            (packet_count - parse_errors) as f64 / packet_count as f64 * 100.0
-        } else {
-            0.0
-        }
-    );
 
     if config.output.export_json.is_some() || config.output.export_csv.is_some() {
         let snapshot = flow_tracker.snapshot();
         if let Some(path) = &config.output.export_json {
-            flow::write_flow_json(path.as_ref(), &snapshot)?;
-            println!("  Flow export (JSON): {}", path.display());
+            if let Err(err) = flow::write_flow_json(path.as_ref(), &snapshot) {
+                accounting.output_errors.push(format!(
+                    "flow JSON export '{}' failed: {err}",
+                    path.display()
+                ));
+                final_error.get_or_insert_with(|| err.to_string());
+            } else {
+                println!("  Flow export (JSON): {}", path.display());
+            }
         }
         if let Some(path) = &config.output.export_csv {
-            flow::write_flow_csv(path.as_ref(), &snapshot)?;
-            println!("  Flow export (CSV):  {}", path.display());
+            if let Err(err) = flow::write_flow_csv(path.as_ref(), &snapshot) {
+                accounting.output_errors.push(format!(
+                    "flow CSV export '{}' failed: {err}",
+                    path.display()
+                ));
+                final_error.get_or_insert_with(|| err.to_string());
+            } else {
+                println!("  Flow export (CSV):  {}", path.display());
+            }
         }
     }
 
+    if let Some(err) = final_error {
+        return Err(std::io::Error::other(err).into());
+    }
+    if !accounting.output_errors.is_empty() {
+        return Err(std::io::Error::other(format!(
+            "{} output error(s) occurred",
+            accounting.output_errors.len()
+        ))
+        .into());
+    }
     Ok(())
 }
 
@@ -1089,6 +1393,7 @@ fn run_capture_pipeline(
     cap: &mut CaptureSource,
     mut savefile: Option<&mut RotatingSavefile>,
     web_handle: Option<&web::server::WebHandle>,
+    accounting: &mut RunAccounting,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Use the full snaplen as the pool buffer size so every captured packet
     // fits without reallocation. Fall back to 65535 if snaplen is 0 (unset).
@@ -1117,12 +1422,24 @@ fn run_capture_pipeline(
 
     let mut pipe = pipeline::spawn(pipeline_cfg, running.clone(), web_handle)?;
     let num_workers = pipe.num_workers();
+    accounting.worker_count = Some(num_workers);
+    accounting.dispatched_frames = Some(0);
+    accounting.dispatch_drops = Some(0);
+    accounting.worker_processed_frames = Some(0);
+    accounting.worker_failures = Some(0);
+    let capture_mode = cap.mode();
+    let dispatcher = PipelinePacketDispatcher {
+        capture_mode,
+        link_type,
+        senders: &pipe.senders,
+        buffer_pool: &pipe.buffer_pool,
+        stats: &pipe.stats,
+    };
     println!("Pipeline: {} worker shards", num_workers);
     println!();
 
     let mut packet_count: u64 = 0;
     let mut stats_last = Instant::now();
-    let mut final_kernel_stats: Option<(u64, u64)> = None;
     let mut live_stats_poll_last = if cap.mode() == CaptureMode::Live {
         Some(
             Instant::now()
@@ -1156,42 +1473,11 @@ fn run_capture_pipeline(
 
             if let Some(packet) = packet {
                 packet_count += 1;
+                accounting.frames_read = packet_count;
 
-                let timestamp =
-                    packet.header.ts.tv_sec as f64 + packet.header.ts.tv_usec as f64 / 1_000_000.0;
-                let raw_data = packet.data;
                 let wire_len = packet.header.len as u64;
-
-                // Write to pcap file (still on capture thread — fast sequential I/O)
-                if let Err(err) = write_packet_to_savefile(&mut savefile, &packet, packet_count) {
-                    tracing::error!(error = %err, "pcap write error");
-                    return Err(Box::new(err));
-                }
-
-                // Determine shard and dispatch
-                let shard = pipeline::router::shard_for_packet_with_linktype(
-                    raw_data,
-                    num_workers,
-                    link_type,
-                );
-                let mut buf = pipe.buffer_pool.acquire();
-                buf.extend_from_slice(raw_data);
-                let owned = pipeline::OwnedPacket {
-                    id: packet_count,
-                    ts: timestamp,
-                    wire_len,
-                    data: buf,
-                };
-
-                match pipe.senders[shard].try_send(owned) {
-                    Ok(_) => {}
-                    Err(err) => {
-                        pipe.stats.record_dispatch_drop();
-                        let dropped = err.into_inner();
-                        pipe.buffer_pool.release(dropped.data);
-                        tracing::trace!(shard, "worker channel full, dropping packet");
-                    }
-                }
+                accounting.input_wire_bytes = accounting.input_wire_bytes.saturating_add(wire_len);
+                dispatcher.write_and_dispatch(&packet, packet_count, &mut savefile, accounting)?;
             }
 
             if let Some(last_poll) = live_stats_poll_last.as_mut()
@@ -1236,61 +1522,87 @@ fn run_capture_pipeline(
             }
         }
 
-        if let Err(err) = flush_savefile(&mut savefile) {
-            tracing::error!(error = %err, "pcap flush error");
-            return Err(Box::new(err));
-        }
-
-        final_kernel_stats = Some((
-            kernel_stats.dropped_total(),
-            kernel_stats.if_dropped_total(),
-        ));
-
         Ok(())
     })();
 
-    if final_kernel_stats.is_none() {
-        final_kernel_stats = Some((
-            kernel_stats.dropped_total(),
-            kernel_stats.if_dropped_total(),
-        ));
+    let flush_result = flush_savefile(&mut savefile);
+    if let Err(err) = &flush_result {
+        accounting
+            .output_errors
+            .push(format!("pcap flush error: {err}"));
     }
+    let capture_result = match (capture_result, flush_result) {
+        (Err(capture_err), Err(flush_err)) => Err(std::io::Error::other(format!(
+            "{}; pcap flush error: {}",
+            capture_err, flush_err
+        ))
+        .into()),
+        (Err(err), Ok(())) => Err(err),
+        (Ok(()), Err(err)) => Err(Box::new(err) as Box<dyn std::error::Error>),
+        (Ok(()), Ok(())) => Ok(()),
+    };
 
     // Always shut down worker/aggregator threads before returning, including
     // capture/savefile error paths.
     pipe.shutdown();
-    capture_result?;
-
-    if let Some(err) = pipe.aggregator.take_fatal_error() {
-        return Err(std::io::Error::other(err).into());
-    }
-
-    // Print summary
-    println!();
-    println!("{}", "=".repeat(50));
-    println!("Capture complete (pipeline mode).");
-    println!("  Packets captured:  {}", packet_count);
-    println!("  Dispatch drops:    {}", pipe.stats.dispatch_drops_total());
-    if let Some((kernel_dropped, if_dropped)) = final_kernel_stats {
-        println!("  Kernel dropped:    {}", kernel_dropped);
-        println!("  Interface dropped: {}", if_dropped);
-    }
+    let worker_stats = pipe.aggregator.worker_stats();
+    accounting.dispatched_frames = Some(accounting.dispatched_frames.unwrap_or(0));
+    accounting.dispatch_drops = Some(pipe.stats.dispatch_drops_total());
+    accounting.worker_processed_frames = Some(worker_stats.processed_frames);
+    accounting.worker_failures = Some(
+        accounting
+            .dispatched_frames
+            .unwrap_or(0)
+            .saturating_sub(worker_stats.processed_frames),
+    );
+    accounting.packets_parsed = worker_stats.parsed_packets;
+    accounting.packets_with_transport_header = worker_stats.packets_with_transport_header;
+    accounting.malformed_or_unsupported_packets = worker_stats.malformed_or_unsupported_packets;
+    accounting.flows_created = worker_stats.flows.created;
+    accounting.flows_expired = worker_stats.flows.expired;
+    accounting.flows_evicted = worker_stats.flows.evicted;
+    accounting.alerts_emitted = pipe.aggregator.alert_count();
+    accounting
+        .output_errors
+        .extend(pipe.aggregator.output_errors());
 
     // Export flows from aggregated shard snapshots (shutdown() joins all
     // worker threads, so snapshots are guaranteed to be present).
     if config.output.export_json.is_some() || config.output.export_csv.is_some() {
         let snapshot = pipe.aggregator.take_final_snapshots();
         if let Some(path) = &config.output.export_json {
-            flow::write_flow_json(path.as_ref(), &snapshot)?;
+            if let Err(err) = flow::write_flow_json(path.as_ref(), &snapshot) {
+                accounting.output_errors.push(format!(
+                    "flow JSON export '{}' failed: {err}",
+                    path.display()
+                ));
+                return Err(err);
+            }
             println!("  Flow export (JSON): {}", path.display());
         }
         if let Some(path) = &config.output.export_csv {
-            flow::write_flow_csv(path.as_ref(), &snapshot)?;
+            if let Err(err) = flow::write_flow_csv(path.as_ref(), &snapshot) {
+                accounting.output_errors.push(format!(
+                    "flow CSV export '{}' failed: {err}",
+                    path.display()
+                ));
+                return Err(err);
+            }
             println!("  Flow export (CSV):  {}", path.display());
         }
     }
 
-    Ok(())
+    if let Some(err) = pipe.aggregator.take_fatal_error() {
+        return match capture_result {
+            Ok(()) => Err(std::io::Error::other(err).into()),
+            Err(capture_err) => Err(std::io::Error::other(format!(
+                "pipeline error: {}; capture error: {}",
+                err, capture_err
+            ))
+            .into()),
+        };
+    }
+    capture_result
 }
 
 #[derive(Debug, Clone)]
@@ -1480,6 +1792,7 @@ fn load_config(args: &cli::Cli) -> Result<RuntimeConfig, config::ConfigError> {
     override_value(&mut output.write_pcap_max_files, &args.write_pcap_max_files);
     override_option(&mut output.export_json, &args.export_json);
     override_option(&mut output.export_csv, &args.export_csv);
+    override_option(&mut output.summary_json, &args.summary_json);
     override_clearable_path(&mut analysis.alerts_jsonl, &args.alerts_jsonl);
     override_clearable_path(&mut output.expired_flows_jsonl, &args.expired_flows_jsonl);
     override_clearable_path(&mut output.expired_flows_csv, &args.expired_flows_csv);
@@ -1559,6 +1872,217 @@ mod tests {
         path.push(format!("netscope-test-{}-{}.toml", pid, ts));
         fs::write(&path, contents).expect("config should be written");
         path
+    }
+
+    fn write_single_packet_pcap(path: &Path, packet: &[u8]) {
+        use std::io::Write;
+
+        let mut file = fs::File::create(path).expect("pcap should be created");
+        file.write_all(&0xa1b2c3d4u32.to_le_bytes())
+            .expect("pcap magic should be written");
+        file.write_all(&2u16.to_le_bytes())
+            .expect("pcap major version should be written");
+        file.write_all(&4u16.to_le_bytes())
+            .expect("pcap minor version should be written");
+        file.write_all(&0i32.to_le_bytes())
+            .expect("pcap timezone should be written");
+        file.write_all(&0u32.to_le_bytes())
+            .expect("pcap sigfigs should be written");
+        file.write_all(&65535u32.to_le_bytes())
+            .expect("pcap snaplen should be written");
+        file.write_all(&1u32.to_le_bytes())
+            .expect("pcap link type should be written");
+        file.write_all(&1u32.to_le_bytes())
+            .expect("packet timestamp should be written");
+        file.write_all(&0u32.to_le_bytes())
+            .expect("packet timestamp fraction should be written");
+        file.write_all(&(packet.len() as u32).to_le_bytes())
+            .expect("packet captured length should be written");
+        file.write_all(&(packet.len() as u32).to_le_bytes())
+            .expect("packet wire length should be written");
+        file.write_all(packet)
+            .expect("packet data should be written");
+    }
+
+    fn test_tcp_ethernet_packet(src_last_octet: u8, dst_last_octet: u8) -> Vec<u8> {
+        let packet = vec![
+            0xff,
+            0xff,
+            0xff,
+            0xff,
+            0xff,
+            0xff, // destination MAC
+            0x00,
+            0x11,
+            0x22,
+            0x33,
+            0x44,
+            0x55, // source MAC
+            0x08,
+            0x00, // IPv4
+            0x45,
+            0x00,
+            0x00,
+            0x28, // version/IHL, TOS, total length
+            0x00,
+            0x01,
+            0x00,
+            0x00, // identification, fragment flags
+            64,
+            6,
+            0x00,
+            0x00, // TTL, TCP, checksum
+            10,
+            0,
+            0,
+            src_last_octet, // source IPv4 address
+            10,
+            0,
+            0,
+            dst_last_octet, // destination IPv4 address
+            0x30,
+            0x39,
+            0x00,
+            0x50, // source/destination ports
+            0x00,
+            0x00,
+            0x00,
+            0x01, // sequence number
+            0x00,
+            0x00,
+            0x00,
+            0x00, // acknowledgment number
+            0x50,
+            0x10,
+            0x20,
+            0x00, // data offset/flags, window
+            0x00,
+            0x00,
+            0x00,
+            0x00, // checksum, urgent pointer
+        ];
+        packet
+    }
+
+    fn unique_test_path(name: &str) -> PathBuf {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be valid")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "netscope-test-{}-{}-{}",
+            name,
+            std::process::id(),
+            ts
+        ))
+    }
+
+    #[test]
+    fn live_dispatch_drop_keeps_capture_pcap_and_counts_the_drop() {
+        use crossbeam_channel::bounded;
+
+        let dir = unique_test_path("live-dispatch-drop");
+        fs::create_dir_all(&dir).expect("test directory should be created");
+        let input_path = dir.join("input.pcap");
+        let output_path = dir.join("captured.pcap");
+        let dropped_packet = test_tcp_ethernet_packet(3, 4);
+        write_single_packet_pcap(&input_path, &dropped_packet);
+
+        {
+            let mut capture = CaptureSource::Offline(
+                pcap::Capture::from_file(&input_path).expect("input pcap should open"),
+            );
+            let mut output = RotatingSavefile::open(&mut capture, &output_path, None)
+                .expect("capture output should open");
+            let packet = match capture.next_packet().expect("input packet should read") {
+                CaptureRead::Packet(packet) => packet,
+                CaptureRead::Idle | CaptureRead::Eof => {
+                    panic!("input pcap should contain one packet")
+                }
+            };
+
+            let (sender, receiver) = bounded(1);
+            let queued_packet = test_tcp_ethernet_packet(1, 2);
+            sender
+                .send(pipeline::OwnedPacket {
+                    id: 0,
+                    ts: 0.0,
+                    wire_len: queued_packet.len() as u64,
+                    data: queued_packet.clone(),
+                })
+                .expect("queue should accept its first packet");
+            let senders = [sender];
+            let buffer_pool = pipeline::PacketBufPool::new(1, 64);
+            let stats = pipeline::PipelineStats::new();
+            let dispatcher = PipelinePacketDispatcher {
+                capture_mode: CaptureMode::Live,
+                link_type: protocol::LinkType::Ethernet,
+                senders: &senders,
+                buffer_pool: &buffer_pool,
+                stats: &stats,
+            };
+            let mut accounting = RunAccounting {
+                frames_read: 1,
+                dispatched_frames: Some(0),
+                dispatch_drops: Some(0),
+                ..RunAccounting::default()
+            };
+            let mut savefile = Some(&mut output);
+
+            dispatcher
+                .write_and_dispatch(&packet, 1, &mut savefile, &mut accounting)
+                .expect("a full live queue should count a drop without failing capture");
+
+            assert_eq!(accounting.frames_read, 1);
+            assert_eq!(accounting.dispatched_frames, Some(0));
+            assert_eq!(accounting.dispatch_drops, Some(1));
+            assert_eq!(stats.dispatch_drops_total(), 1);
+            assert_eq!(
+                receiver.len(),
+                1,
+                "the dropped packet must not enter the queue"
+            );
+            let accepted = receiver
+                .try_recv()
+                .expect("original queued packet should remain");
+            assert_eq!(accepted.data, queued_packet);
+            assert!(
+                receiver.try_recv().is_err(),
+                "no second packet should be queued"
+            );
+
+            let parsed =
+                protocol::parse_packet_with_linktype(&accepted.data, protocol::LinkType::Ethernet)
+                    .expect("the accepted packet should parse");
+            let mut worker_flows = flow::FlowTracker::new(60.0, 1024, false, false, false);
+            worker_flows.observe(accepted.ts, accepted.wire_len, &parsed);
+            let flow_export_path = dir.join("flows.json");
+            flow::write_flow_json(&flow_export_path, &worker_flows.snapshot())
+                .expect("accepted worker packet should be exported");
+            let flow_export: serde_json::Value = serde_json::from_slice(
+                &fs::read(&flow_export_path).expect("flow export should exist"),
+            )
+            .expect("flow export should be valid JSON");
+            assert_eq!(flow_export.as_array().expect("flow array").len(), 1);
+            assert_eq!(flow_export[0]["packets_total"], 1);
+            assert_eq!(flow_export[0]["endpoint_a"]["ip"], "10.0.0.1");
+            assert_eq!(flow_export[0]["endpoint_b"]["ip"], "10.0.0.2");
+
+            flush_savefile(&mut savefile).expect("capture pcap should flush");
+        }
+
+        let mut saved_capture =
+            pcap::Capture::from_file(&output_path).expect("written pcap should open");
+        let saved_packet = saved_capture
+            .next_packet()
+            .expect("captured packet should remain in the output pcap");
+        assert_eq!(saved_packet.data, dropped_packet);
+        assert!(matches!(
+            saved_capture.next_packet(),
+            Err(pcap::Error::NoMorePackets)
+        ));
+
+        fs::remove_dir_all(&dir).expect("test directory should be removed");
     }
 
     #[test]

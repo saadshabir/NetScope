@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::analysis::anomaly::AnomalyDetector;
 use crate::config::{AnalysisConfig, FlowConfig, WebConfig};
-use crate::flow::{ExpiredFlowEvent, FlowDelta, FlowSnapshot, FlowTracker};
+use crate::flow::{ExpiredFlowEvent, FlowDelta, FlowSnapshot, FlowTracker, FlowTrackerStats};
 use crate::protocol;
 use crate::web::messages::{AlertMsg, PacketSample, StoredPacket};
 
@@ -46,6 +46,16 @@ pub struct ShardTick {
 pub struct ShardShutdown {
     pub shard_id: usize,
     pub flows: Vec<FlowSnapshot>,
+    pub stats: WorkerRunStats,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WorkerRunStats {
+    pub processed_frames: u64,
+    pub parsed_packets: u64,
+    pub packets_with_transport_header: u64,
+    pub malformed_or_unsupported_packets: u64,
+    pub flows: FlowTrackerStats,
 }
 
 pub struct Worker {
@@ -66,6 +76,7 @@ pub struct Worker {
     tick_bytes: u64,
     tick_packets: u64,
     tick_next: Instant,
+    run_stats: WorkerRunStats,
 }
 
 pub struct WorkerConfigBundle {
@@ -117,6 +128,7 @@ impl Worker {
             tick_bytes: 0,
             tick_packets: 0,
             tick_next: Instant::now() + tick_interval,
+            run_stats: WorkerRunStats::default(),
         }
     }
 
@@ -174,23 +186,44 @@ impl Worker {
         let _ = agg_tx.send(WorkerEvent::Shutdown(ShardShutdown {
             shard_id: self.shard_id,
             flows,
+            stats: WorkerRunStats {
+                flows: self.flow_tracker.stats(),
+                ..self.run_stats
+            },
         }));
 
         tracing::debug!(shard = self.shard_id, "worker shut down");
     }
 
     fn process_packet(&mut self, pkt: &OwnedPacket, agg_tx: &Sender<WorkerEvent>) {
+        self.run_stats.processed_frames = self.run_stats.processed_frames.saturating_add(1);
         self.tick_bytes += pkt.wire_len;
         self.tick_packets += 1;
 
         match protocol::parse_packet_with_linktype(&pkt.data, self.link_type) {
             Ok(parsed) => {
+                self.run_stats.parsed_packets = self.run_stats.parsed_packets.saturating_add(1);
+                if parsed.transport.is_some() {
+                    self.run_stats.packets_with_transport_header = self
+                        .run_stats
+                        .packets_with_transport_header
+                        .saturating_add(1);
+                }
+                if parsed.transport_parse_error.is_some() || parsed.unsupported {
+                    self.run_stats.malformed_or_unsupported_packets = self
+                        .run_stats
+                        .malformed_or_unsupported_packets
+                        .saturating_add(1);
+                }
+
                 // Anomaly detection
                 if self.analysis_cfg.anomalies.enabled {
                     match crate::maybe_analyze_anomaly(&mut self.anomaly_detector, pkt.ts, &parsed)
                     {
                         Ok(alerts) => {
                             for alert in alerts {
+                                // Count an emitted alert only when it was
+                                // successfully handed to the aggregator.
                                 if self
                                     .send_event(
                                         agg_tx,
@@ -204,6 +237,7 @@ impl Worker {
                                 {
                                     return;
                                 }
+                                // The event has reached the aggregator queue.
                             }
                         }
                         Err(err) => {
@@ -265,6 +299,10 @@ impl Worker {
                 }
             }
             Err(e) => {
+                self.run_stats.malformed_or_unsupported_packets = self
+                    .run_stats
+                    .malformed_or_unsupported_packets
+                    .saturating_add(1);
                 tracing::trace!(shard = self.shard_id, error = %e, "parse error");
             }
         }

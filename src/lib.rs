@@ -11,6 +11,7 @@ pub mod metrics;
 pub mod packet_format;
 pub mod pipeline;
 pub mod protocol;
+pub mod run_summary;
 pub mod sinks;
 pub mod web;
 

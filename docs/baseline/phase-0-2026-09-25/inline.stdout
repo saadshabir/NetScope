@@ -1,0 +1,13 @@
+NetScope v0.1.0
+Reading packets from pcap: /tmp/netscope-phase0-20260925/baseline-runs/known-two-packet.pcap
+Processing packets until EOF...
+Datalink: Ethernet
+
+
+==================================================
+Capture complete.
+  Packets captured:  2
+  Parse errors:      0
+  Success rate:      100.0%
+  Flow export (JSON): /tmp/netscope-phase0-20260925/baseline-runs/inline-flows.json
+==================================================
