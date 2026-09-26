@@ -79,8 +79,6 @@ struct AggregatorState {
     num_workers: usize,
     /// Latest merged tick (main thread reads this for CLI stats).
     latest_tick: Option<AggregatedTick>,
-    /// Accumulated alert count.
-    alert_count: u64,
     /// Per-shard final snapshots collected on shutdown.
     shard_snapshots: Vec<Option<Vec<FlowSnapshot>>>,
     /// Cumulative packet and flow accounting collected from workers.
@@ -97,7 +95,6 @@ impl AggregatorHandle {
             inner: Arc::new(Mutex::new(AggregatorState {
                 num_workers,
                 latest_tick: None,
-                alert_count: 0,
                 shard_snapshots: vec![None; num_workers],
                 worker_stats: WorkerRunStats::default(),
                 output_errors: Vec::new(),
@@ -109,14 +106,6 @@ impl AggregatorHandle {
     /// Take the latest aggregated tick (returns `None` if no new tick since last call).
     pub fn take_tick(&self) -> Option<AggregatedTick> {
         self.inner.lock().ok()?.latest_tick.take()
-    }
-
-    /// Current alert count.
-    pub fn alert_count(&self) -> u64 {
-        self.inner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .alert_count
     }
 
     pub fn worker_stats(&self) -> WorkerRunStats {
@@ -356,17 +345,6 @@ fn handle_event(
             let mut state = handle.inner.lock().unwrap_or_else(|e| e.into_inner());
             record_shutdown_snapshot(&mut state, shutdown);
         }
-        WorkerEvent::Alert(alert) => {
-            {
-                let mut state = handle.inner.lock().unwrap_or_else(|e| e.into_inner());
-                state.alert_count += 1;
-            }
-            output_sinks.write_alert(alert.ts, &alert.kind, &alert.description)?;
-            println!("[alert] {}", alert.description);
-            if let Some(tx) = web_event_tx {
-                let _ = tx.try_send(CaptureEvent::Alert(alert));
-            }
-        }
         WorkerEvent::ExpiredFlows(events) => {
             output_sinks.write_expired_flows(&events)?;
         }
@@ -425,10 +403,26 @@ fn record_shutdown_snapshot(state: &mut AggregatorState, shutdown: ShardShutdown
         .worker_stats
         .parsed_packets
         .saturating_add(shutdown.stats.parsed_packets);
+    state.worker_stats.packets_with_network_header = state
+        .worker_stats
+        .packets_with_network_header
+        .saturating_add(shutdown.stats.packets_with_network_header);
     state.worker_stats.packets_with_transport_header = state
         .worker_stats
         .packets_with_transport_header
         .saturating_add(shutdown.stats.packets_with_transport_header);
+    state.worker_stats.packet_parse_errors = state
+        .worker_stats
+        .packet_parse_errors
+        .saturating_add(shutdown.stats.packet_parse_errors);
+    state.worker_stats.transport_parse_errors = state
+        .worker_stats
+        .transport_parse_errors
+        .saturating_add(shutdown.stats.transport_parse_errors);
+    state.worker_stats.unsupported_packets = state
+        .worker_stats
+        .unsupported_packets
+        .saturating_add(shutdown.stats.unsupported_packets);
     state.worker_stats.malformed_or_unsupported_packets = state
         .worker_stats
         .malformed_or_unsupported_packets

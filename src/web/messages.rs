@@ -150,9 +150,33 @@ pub struct LayerDetail {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AlertMsg {
+    pub schema_version: u32,
     pub ts: f64,
     pub kind: String,
+    pub source_ip: Option<IpAddr>,
+    pub target_ip: Option<IpAddr>,
+    pub target_port: Option<u16>,
+    pub window_secs: f64,
+    pub thresholds: crate::analysis::anomaly::AlertThresholds,
+    pub observed: crate::analysis::anomaly::AlertObservations,
     pub description: String,
+}
+
+impl From<&crate::analysis::anomaly::Alert> for AlertMsg {
+    fn from(alert: &crate::analysis::anomaly::Alert) -> Self {
+        AlertMsg {
+            schema_version: alert.schema_version,
+            ts: alert.ts,
+            kind: alert.kind.as_str().to_string(),
+            source_ip: alert.source_ip,
+            target_ip: alert.target_ip,
+            target_port: alert.target_port,
+            window_secs: alert.window_secs,
+            thresholds: alert.thresholds.clone(),
+            observed: alert.observed.clone(),
+            description: alert.description.clone(),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

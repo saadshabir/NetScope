@@ -1,6 +1,6 @@
 # NetScope streamlining plan
 
-- **Status:** Phases 0, 1, and 2 complete. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget. Phase 2 adds deterministic synthetic PCAP investigations and regression coverage.
+- **Status:** Phases 0, 1, 2, and 3 complete; Phase 4 has not started. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget. Phase 2 adds deterministic synthetic PCAP investigations and regression coverage. Phase 3 documents parser capability, hardens anomaly state, and defines inline-only anomaly semantics.
 - **Change type:** Focused cleanup with explicit behavior changes where current behavior is misleading.
 - **Baseline inspected:** 2026-09-24, `main` at `6355f8c`.
 - **Target:** A dependable Rust packet and flow investigation tool with reproducible correctness and performance evidence.
@@ -76,7 +76,7 @@ This is the intended externally visible behavior after the cleanup. Implementati
 - Offline pipeline accounting reconciles input, dispatch, worker completion, and any failure. A full bounded queue applies backpressure rather than dropping file input.
 - Live kernel/libpcap, interface, and application dispatch drops remain separate. Unavailable counters are marked unavailable, never silently shown as zero.
 - Final summaries are written only after workers and output sinks have drained. A failed sink or incomplete worker shutdown changes the exit status.
-- Identical synthetic PCAPs and config produce the same flow and alert decisions in supported modes, aside from explicitly documented presentation ordering.
+- Identical synthetic PCAPs and config produce the same flow decisions in supported modes and the same alert decisions wherever anomaly detection is supported. Pipeline runs with an enabled detector fail before capture.
 
 ## Target implementation shape
 
@@ -95,8 +95,8 @@ The current repository already contains libpcap capture, classic PCAP reading, B
 | Integration tests write temporary one-packet PCAPs; no sample PCAP is tracked. | `tests/offline_read_pcap.rs`, `tests/pcap_rotation.rs` | A new reviewer cannot reproduce a meaningful investigation from the checkout. |
 | A fast offline file can finish before the periodic stats tick; the final summary lacks elapsed time and full processing counts. | `src/main.rs` inline and pipeline capture loops | Console stats are unsuitable as a benchmark data source. |
 | Offline pipeline dispatch uses `try_send`, so a fast file reader can drop packets when a worker queue is full. | `src/main.rs` pipeline capture loop | Offline results can be incomplete even though there is no live capture pressure. |
-| Pipeline anomalies are per worker, while routing hashes the canonical full flow tuple. Multiple sources attacking one destination can land on different workers. | `src/pipeline/router.rs`, `src/pipeline/worker.rs`, `docs/pipeline.md` | Current alert thresholds are not globally equivalent between inline and pipeline modes; the former destination-to-one-shard claim has been corrected in the reader guides. |
-| Anomaly cleanup retains a nonempty queue for an inactive key without removing old events from that queue. | `src/analysis/anomaly.rs` | One-time sources can retain detection state longer than intended. |
+| Pipeline anomalies were evaluated per worker, while routing hashes the canonical full flow tuple. Multiple sources attacking one destination can land on different workers. | `src/pipeline/router.rs`, `src/pipeline/worker.rs`, `docs/pipeline.md` | Phase 3 removes shard-local detectors and rejects pipeline runs with enabled anomaly detection before capture. |
+| Anomaly cleanup retained stale events and cooldown keys for inactive sources. | `src/analysis/anomaly.rs` | Phase 3 sweeps expired entries every 30 seconds, prunes on observation, and shrinks retained queue/map capacity. |
 | The live throughput script starts replay before capture; the combined validation script uses macOS-specific `/usr/bin/time -l`. | `scripts/perf/validate-throughput.sh`, `scripts/perf/validate.sh` | Existing scripts cannot establish reliable loss or portable resource measurements. |
 | `.gitignore` contains literal Markdown fences; ignored `target/` output occupies about 6 GB locally. | `.gitignore`, local `target/` | Clean the ignore rules and generated output after a fresh build is reproducible. |
 
@@ -321,9 +321,9 @@ The Phase 1.2 regression already present in the working tree covers the first fi
 **Final run summary**
 
 - Added `--summary-json <PATH>` and `output.summary_json`. Schema version 1 is written after capture processing, worker shutdown, sink flushes, and flow export. The terminal summary remains available without JSON output.
-- The stable top-level fields are `schema_version`, `application_version`, `status`, `run_error`, `mode`, `source`, `worker_count`, `elapsed_wall_seconds`, `effective_config`, `frames_read`, `input_wire_bytes`, `packets_parsed`, `packets_with_transport_header`, `malformed_or_unsupported_packets`, `dispatched_frames`, `dispatch_drops`, `worker_processed_frames`, `worker_failures`, `flows_created`, `flows_expired`, `flows_evicted`, `alerts_emitted`, `kernel_drops`, `interface_drops`, and `output_errors`.
+- The stable top-level fields are `schema_version`, `application_version`, `status`, `run_error`, `mode`, `source`, `worker_count`, `elapsed_wall_seconds`, `effective_config`, `frames_read`, `input_wire_bytes`, `packets_parsed`, `packets_with_network_header`, `packets_with_transport_header`, `packet_parse_errors`, `transport_parse_errors`, `unsupported_packets`, `malformed_or_unsupported_packets`, `dispatched_frames`, `dispatch_drops`, `worker_processed_frames`, `worker_failures`, `flows_created`, `flows_expired`, `flows_evicted`, `alerts_emitted`, `kernel_drops`, `interface_drops`, and `output_errors`.
 - `status` is `success`, `failed`, or `interrupted`; `source` identifies either `pcap:<path>` or `interface:<name>`. `effective_config` records the effective capture, flow, analysis, stats, output, web, and pipeline settings without credentials. Its named settings include `capture` (`link_type`, `filter`, `snaplen`, `timeout_ms`, `promiscuous`, `buffer_size_mb`, `immediate_mode`), `packet_limit`, `flow_timeout_secs`, `max_flows`, `rtt_tracking`, `retransmission_tracking`, `out_of_order_tracking`, `anomaly_detection`, `anomaly_settings`, `stats`, `output`, `web`, `pipeline_enabled`, `requested_workers`, and `pipeline_channel_capacity`.
-- `input_wire_bytes` sums the original wire lengths. `packets_parsed` counts frames whose link header was recognized; `packets_with_transport_header` counts recognized transport headers. A partial packet can count as parsed and also as malformed or unsupported. Pipeline counters are `null` in inline mode, and kernel/interface drop counters are `null` for offline input or when unavailable.
+- `input_wire_bytes` sums the original wire lengths. `packets_parsed` counts frames for which the parser returned a `ParsedPacket`; unsupported payloads can still count as parsed, while truncated link/network headers return errors. `packets_with_network_header` counts ARP/IPv4/IPv6 headers; `packets_with_transport_header` counts recognized TCP/UDP/ICMP/ICMPv6 headers. Link/network parse errors, malformed supported transport headers, and unsupported payloads have separate counters. `malformed_or_unsupported_packets` remains as a compatibility aggregate. A partial packet can count as parsed and also as malformed or unsupported. Pipeline counters are `null` in inline mode, and kernel/interface drop counters are `null` for offline input or when unavailable.
 - Pipeline accounting reconciles `frames_read = dispatched_frames + dispatch_drops` and, after worker shutdown, `dispatched_frames = worker_processed_frames + worker_failures`. Flow lifecycle and alert counters report observed events. Output open, write, flush, and export failures are recorded in `output_errors` and make the run fail.
 
 **Dispatch and output behavior**
@@ -394,30 +394,58 @@ The anomaly fixtures should use explicit demo thresholds in a checked-in config.
 
 **Exit gate:** A new contributor can run the normal and anomaly examples from a clean checkout without root and obtain the documented results.
 
-**Completion record (2026-09-26):** Added four deterministic fixtures (8, 16, 64, and 6 packets), a standard-library streaming generator, a manifest with hashes, counts, and expected parser results, fixture-specific anomaly thresholds, three investigations, and parser-boundary notes. The README now runs the normal fixture as its offline quickstart, and CI verifies the checked-in PCAP hashes against regenerated output. The Phase 2 integration tests pass in inline and two-worker pipeline modes, including directional flow parity; release smoke runs confirm the documented one-alert inline and two-alert pipeline results for both anomaly examples, with zero offline dispatch drops.
+**Completion record (2026-09-26):** Added four deterministic fixtures (8, 16, 64, and 6 packets), a standard-library streaming generator, a manifest with hashes, counts, and expected parser results, fixture-specific anomaly thresholds, three investigations, and parser-boundary notes. The README now runs the normal fixture as its offline quickstart, and CI verifies the checked-in PCAP hashes against regenerated output. The Phase 2 integration tests passed in inline and two-worker pipeline modes, including directional flow parity; release smoke runs confirmed the then-current one-alert inline and two-alert pipeline results for both anomaly examples, with zero offline dispatch drops. **Phase 3 supersedes those historical pipeline alert results:** active anomaly detection is now rejected in pipeline mode.
 
 `python3 scripts/generate_examples.py --check`, `cargo fmt -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo build --locked --release`, `cargo test --locked --test phase2_examples`, and `git diff --check` pass. A full `cargo test --locked` attempt ran 126 library tests: 123 passed, while three existing WebSocket tests could not bind their loopback listeners in this restricted environment (`PermissionDenied`). This environment-only failure is separate from the passing Phase 2 integration tests.
 
 ## Phase 3 — Harden protocol and anomaly behavior
 
+**Implementation complete (2026-09-26):** The detector sweeps expired queues and cooldowns across inactive keys, prunes stale observations before evaluation, shrinks retained capacity, and uses a monotonic timestamp watermark. Pipeline anomaly detection is rejected before capture, alerts have schema version 1 with structured threshold/window context, and the run summary separates network, transport, parse-error, and unsupported-packet counts.
+
 ### 3.1 Make the protocol matrix precise
 
-- [ ] Document the actual decoding level for every supported protocol: header recognized, fields displayed, flow tracked, and payload inspected. Treat DNS on UDP/53 and TLS ClientHello SNI as their narrow implemented cases.
-- [ ] Check Ethernet, Linux SLL, loopback, raw IP, VLAN/QinQ, IPv4 fragments, and bounded IPv6 extension walking against fixture or unit-test evidence.
-- [ ] Verify flow keys and direction across retransmissions, out-of-order segments, TCP state changes, and timestamp gaps. Record which cases use packet-level inference rather than reassembly.
-- [ ] Make unsupported formats and partial parsing visible in the final summary. Avoid a blanket “success rate” that hides how far a packet was decoded.
+- [x] Document the actual decoding level for every supported protocol: header recognized, fields displayed, flow tracked, and payload inspected. Treat DNS on UDP/53 and TLS ClientHello SNI as their narrow implemented cases.
+- [x] Check Ethernet, Linux SLL, loopback, raw IP, VLAN/QinQ, IPv4 fragments, and bounded IPv6 extension walking against fixture or unit-test evidence.
+- [x] Verify flow keys and direction across retransmissions, out-of-order segments, TCP state changes, and timestamp gaps. Record which cases use packet-level inference rather than reassembly.
+- [x] Make unsupported formats and partial parsing visible in the final summary. Avoid a blanket “success rate” that hides how far a packet was decoded.
+
+#### Protocol capability matrix
+
+| Layer / protocol | Header fields recognized and shown | Flow tracked | Payload inspected |
+| --- | --- | --- | --- |
+| Ethernet | Source/destination MAC and EtherType; detail view includes both MACs and raw EtherType. | Passes supported inner IP to flow tracking. | No link payload decoding by itself. |
+| Linux SLL v1 | Packet type, ARPHRD, address, and protocol. SLL2 is not supported. | Passes supported inner IP to flow tracking. | No link payload decoding by itself. |
+| Loopback NULL/LOOP | Family and byte order; the following IP version nibble selects IPv4 or IPv6. | Passes supported inner IP to flow tracking. | No loopback payload decoding by itself. |
+| Raw IP | IP version is read from the first nibble; there is no link header. | Passes supported inner IP to flow tracking. | No raw-link payload decoding by itself. |
+| 802.1Q / 802.1ad VLAN | Tag ID, priority, and DEI; up to four tags are retained and displayed, with deeper stacks marked truncated. | Passes supported inner IP to flow tracking. | No VLAN payload decoding by itself. |
+| ARP | Hardware/protocol types and lengths, operation, sender and target addresses. | No. | ARP request/reply fields only. |
+| IPv4 | Source/destination, protocol, TTL, length, ID, fragment flags/offset, DSCP/ECN, and checksum. | TCP/UDP only. Non-initial fragments are unsupported and skipped; an initial fragment is eligible if its transport header is complete. | No IP payload reassembly. |
+| IPv6 | Source/destination, effective next header, hop limit, payload length, traffic class, flow label; walks at most 16 common extension headers. | TCP/UDP only. Non-initial fragments are unsupported and skipped. | No extension-chain or fragment reassembly; ESP and No Next Header payloads are not inspected. |
+| TCP | Ports, sequence/ack numbers, flags, window, and header length. | Yes, by directionless protocol + endpoint tuple. Directional counts; SYN-based client inference; optional state, RTT, retransmission, and out-of-order estimates. | TLS SNI only when a complete ClientHello is present in one captured TCP payload. No TCP stream reassembly. |
+| UDP | Ports and declared datagram length. | Yes, by directionless protocol + endpoint tuple. | DNS parsing only when either port is 53; query summary decodes the first question, response summary reports section counts. No DNS over TCP. |
+| ICMP / ICMPv6 | Type and code; echo packets also show identifier and sequence. | No. | No body inspection beyond the fixed header fields. |
+
+Malformed link/network headers and unsupported capture link types fail parsing and increment `packet_parse_errors`. A malformed recognized transport header keeps its link/network decode and increments `transport_parse_errors`. Unsupported EtherTypes, IP protocols, and non-initial fragments are counted in `unsupported_packets`. The compatibility aggregate counts each affected frame once. The `-vv` packet detail view adds decoded fields and a bounded hex dump; summary mode shows the compact header fields described above.
+
+Evidence: parser boundary tests in `src/protocol/mod.rs`, the 16-header IPv6 walk and truncation tests in `src/protocol/ipv6.rs`, normal and protocol-edge fixture coverage in `tests/phase2_examples.rs`, and packet-path flow state/retransmission/ordering/timeout assertions in `src/flow.rs`.
+
+TCP state, client direction, RTT, retransmission, and out-of-order values are inferred from individual captured packets. Flow expiration uses packet timestamps and the periodic expiry check; neither behavior reconstructs a TCP byte stream.
 
 ### 3.2 Bound anomaly state and establish mode semantics
 
-- [ ] During cleanup, remove events older than each configured window even for keys that receive no new packets, then remove empty queues and expired cooldowns.
-- [ ] Test state size after many unique one-time sources and after the clock advances beyond the windows. Cover out-of-order PCAP timestamps explicitly.
-- [ ] Choose a single pipeline policy based on correctness and a measured cost: global detection with equivalent thresholds, or a clear restriction to inline mode. Do not silently divide thresholds by worker count or claim destination affinity from a full-flow hash.
-- [ ] Make alert schema stable: timestamp, kind, source/target identifiers when available, threshold/window context, and human-readable description. Preserve compatibility deliberately if existing consumers use JSONL.
-- [ ] Test threshold boundaries and cooldown rearming with a few focused cases. Exercise the demo configuration through one investigation test; avoid repeating the entire detector test set for each configuration.
+- [x] During cleanup, remove events older than each configured window even for keys that receive no new packets, then remove empty queues and expired cooldowns.
+- [x] Test state size after many unique one-time sources and after the clock advances beyond the windows. Cover out-of-order PCAP timestamps explicitly.
+- [x] Choose a single pipeline policy based on correctness and a measured cost: global detection with equivalent thresholds, or a clear restriction to inline mode. Do not silently divide thresholds by worker count or claim destination affinity from a full-flow hash.
+- [x] Make alert schema stable: timestamp, kind, source/target identifiers when available, threshold/window context, and human-readable description. Preserve compatibility deliberately if existing consumers use JSONL.
+- [x] Test threshold boundaries and cooldown rearming with a few focused cases. Exercise the demo configuration through one investigation test; avoid repeating the entire detector test set for each configuration.
 
 **Deliverables:** Corrected anomaly state, explicit mode behavior, protocol capability matrix, focused tests, and concise material for the consolidated `docs/design.md`.
 
 **Exit gate:** The same supported fixture produces the same alert decisions in both modes, or unsupported combinations fail clearly before processing begins. Long-running detector state stays bounded by its configured windows and active keys.
+
+**Completion record (2026-09-26):** Added the capability matrix and evidence links; extended packet summaries and JSON accounting to distinguish classified packets, network/transport headers, parse errors, malformed transports, and unsupported payloads; removed the misleading success-rate calculation; and added anomaly queue/cooldown cleanup, a captured-frame timestamp watermark, versioned alert context, focused threshold/state tests, and a pre-capture pipeline restriction. The anomaly investigation tests verify the inline alert schema, pipeline rejection, and watermark behavior across unsupported and malformed frames. The old Phase 2 pipeline alert counts are explicitly marked as historical.
+
+Validation passed with `cargo fmt -- --check`, `python3 scripts/generate_examples.py --check`, `cargo clippy --locked --offline --all-targets -- -D warnings`, `git diff --check`, and `cargo test --locked --offline --tests -- --skip ws_connection_succeeds_without_auth --skip ws_happy_path_receives_hello_and_frame --skip ws_lag_recovery_no_duplicate_after_reconnect`. The test command passed 157 tests and skipped three WebSocket tests because the sandbox denies loopback listener binding with `PermissionDenied`.
 
 ## Phase 4 — Reproducible offline benchmarks and profiling
 
@@ -558,7 +586,7 @@ The cleanup should avoid gratuitous user-facing churn, but it should not keep a 
 
 - `--synthetic-flows` is a developer measurement path scheduled to leave the normal CLI after its replacement exists. Benchmark scripts that call it must migrate to the new runner.
 - If `--summary-json` is added, version its schema from the first release. Existing human-readable output remains for people, but scripts should consume JSON rather than scrape prose.
-- If pipeline anomaly detection cannot meet the target semantics, reject `--pipeline --anomalies` with a clear message and document the inline command. Do not keep the weaker per-shard interpretation under the same flag combination.
+- Phase 3 resolves anomaly semantics by restricting anomaly detection to inline mode. Keep the early pipeline rejection and do not restore per-worker thresholds under the same flag combination.
 - Consolidated docs replace 11 legacy paths. Update all repository links and commands before deletion; list moved topics in the [change history appendix](#change-history). Avoid maintaining 11 redirect stubs just to preserve the old catalogue.
 - Existing user PCAPs, flow exports, and alert files are data. The cleanup does not delete or rewrite them. A changed export schema needs a version note and a sample record.
 - Existing `target/` binaries and `tmp/` results are generated local artifacts. Cleaning them is separate from source removal and occurs only after the build and benchmark paths work.
@@ -705,7 +733,7 @@ Note: verbosity level `-vv` or higher also enables detailed per-packet output ev
 | ----------------------- | ---- | ------- | ------------------------------------------------------------------------- |
 | `--anomalies`           | flag | off     | Enable anomaly detection (SYN flood, port scan).                          |
 | `--no-anomalies`        | flag |         | Disable anomaly detection.                                                |
-| `--alerts-jsonl <PATH>` | path | (none)  | Write anomaly alerts as JSON lines to a file (inline and pipeline modes). |
+| `--alerts-jsonl <PATH>` | path | (none)  | Write anomaly alerts as JSON lines to a file (inline mode; pipeline rejects enabled anomaly detection). |
 
 See [Anomaly Detection](anomaly-detection.md) for threshold configuration (requires a config file).
 
@@ -799,7 +827,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Malformed TCP/UDP transport headers retain partial link/network decoding and are counted as malformed instead of fully successful packets.
 - Avoid duplicate DNS parsing when building web packet summaries + details.
-- `--alerts-jsonl` now works in pipeline mode (single-writer JSONL output owned by the aggregator).
+- Pipeline runs with enabled anomaly detection now fail before capture, preventing misleading per-worker alert thresholds; `--alerts-jsonl` remains available in inline mode.
 - `--list-interfaces` no longer depends on successfully loading a config file.
 - Web packet detail lookups are resilient to out-of-order `PacketStored` events in pipeline mode.
 - Pipeline aggregator waits for all shard shutdown snapshots before exiting (prevents incomplete exports on Ctrl-C).

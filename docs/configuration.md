@@ -110,7 +110,7 @@ If either `write_pcap_rotate_mb` or `write_pcap_max_files` is set without the ot
 | `rtt`          | bool | `true`  | Compute TCP RTT estimates.                                                   |
 | `retrans`      | bool | `true`  | Detect TCP retransmissions.                                                  |
 | `out_of_order` | bool | `true`  | Detect out-of-order TCP segments.                                            |
-| `alerts_jsonl` | path | (none)  | Write anomaly alerts as JSON lines to this file (inline and pipeline modes). |
+| `alerts_jsonl` | path | (none)  | Write anomaly alerts as JSON lines to this file. Alert detection and output are inline-only; pipeline rejects runs with an enabled detector. |
 
 When `analysis.rtt`, `analysis.retrans`, and `analysis.out_of_order` are all `false`, NetScope automatically switches flow tracking to its compact scale-mode storage path to reduce per-flow memory usage.
 

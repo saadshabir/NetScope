@@ -114,7 +114,7 @@ If you need strict CSV quoting/escaping for downstream ingestion, prefer the JSO
 
 Write anomaly alerts to a JSON Lines file:
 
-Works in both inline and pipeline modes.
+Anomaly alerts are supported in inline mode only; pipeline mode rejects anomaly-enabled runs before capture.
 
 ```bash
 sudo netscope --anomalies --alerts-jsonl alerts.jsonl
@@ -123,8 +123,8 @@ sudo netscope --anomalies --alerts-jsonl alerts.jsonl
 Each line is a standalone JSON object:
 
 ```json
-{"ts":1706123456.789,"kind":"syn_flood","description":"SYN flood suspected: 250 syns, 60 sources to 10.0.0.1:443"}
-{"ts":1706123470.123,"kind":"port_scan","description":"Port scan suspected: 30 ports, 1 hosts from 10.0.0.99"}
+{"schema_version":1,"ts":1706123456.789,"kind":"syn_flood","source_ip":null,"target_ip":"10.0.0.1","target_port":443,"window_secs":5.0,"thresholds":{"syn_count":200,"unique_sources":50,"unique_ports":null,"unique_hosts":null},"observed":{"syn_count":250,"unique_sources":60,"unique_ports":null,"unique_hosts":null},"description":"SYN flood suspected: 250 syns, 60 sources to 10.0.0.1:443"}
+{"schema_version":1,"ts":1706123470.123,"kind":"port_scan","source_ip":"10.0.0.99","target_ip":null,"target_port":null,"window_secs":10.0,"thresholds":{"syn_count":null,"unique_sources":null,"unique_ports":25,"unique_hosts":10},"observed":{"syn_count":null,"unique_sources":null,"unique_ports":30,"unique_hosts":1},"description":"Port scan suspected: 30 ports, 1 hosts from 10.0.0.99"}
 ```
 
 See [Anomaly Detection](anomaly-detection.md) for details on alert types and thresholds.

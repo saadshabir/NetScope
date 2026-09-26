@@ -59,6 +59,15 @@ fn manifest_fixture(name: &str) -> Value {
 }
 
 fn run_fixture(name: &str, pipeline: bool, show_packets: bool) -> RunOutput {
+    run_fixture_with_options(name, pipeline, show_packets, false)
+}
+
+fn run_fixture_with_options(
+    name: &str,
+    pipeline: bool,
+    show_packets: bool,
+    disable_anomalies: bool,
+) -> RunOutput {
     let mode = if pipeline { "pipeline" } else { "inline" };
     let temp_dir = TempRunDir::new(&format!("{name}-{mode}"));
     let summary_path = temp_dir.file("summary.json");
@@ -82,6 +91,9 @@ fn run_fixture(name: &str, pipeline: bool, show_packets: bool) -> RunOutput {
         command.arg("--no-quiet");
     } else {
         command.arg("--quiet");
+    }
+    if disable_anomalies {
+        command.arg("--no-anomalies");
     }
     if pipeline {
         command.arg("--pipeline").arg("--workers").arg("2");
@@ -116,6 +128,29 @@ fn run_fixture(name: &str, pipeline: bool, show_packets: bool) -> RunOutput {
     }
 }
 
+fn assert_pipeline_anomalies_rejected(name: &str) {
+    let config_path = Path::new(REPO_ROOT).join("examples/anomaly-demo.toml");
+    let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+        .arg("--read-pcap")
+        .arg(fixture_path(name))
+        .arg("--config")
+        .arg(config_path)
+        .arg("--pipeline")
+        .arg("--workers")
+        .arg("2")
+        .arg("--quiet")
+        .output()
+        .expect("netscope should reject unsupported pipeline/anomaly configuration");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("pipeline mode does not support anomaly detection"));
+    assert!(
+        output.stdout.is_empty(),
+        "capture must not start before rejection"
+    );
+}
+
 fn assert_accounting(name: &str, run: &RunOutput, pipeline: bool) {
     let fixture = manifest_fixture(name);
     assert_eq!(
@@ -134,7 +169,11 @@ fn assert_accounting(name: &str, run: &RunOutput, pipeline: bool) {
         "parsed packet count should match the checked-in manifest for {name}"
     );
     for field in [
+        "packets_with_network_header",
         "packets_with_transport_header",
+        "packet_parse_errors",
+        "transport_parse_errors",
+        "unsupported_packets",
         "malformed_or_unsupported_packets",
     ] {
         assert_eq!(
@@ -143,6 +182,15 @@ fn assert_accounting(name: &str, run: &RunOutput, pipeline: bool) {
             "{field} should match the checked-in manifest for {name}"
         );
     }
+    assert_eq!(
+        run.summary["malformed_or_unsupported_packets"].as_u64(),
+        Some(
+            run.summary["packet_parse_errors"].as_u64().unwrap()
+                + run.summary["transport_parse_errors"].as_u64().unwrap()
+                + run.summary["unsupported_packets"].as_u64().unwrap()
+        ),
+        "the compatibility aggregate should reconcile with the detailed counters"
+    );
     assert_eq!(run.summary["status"], "success");
     assert_eq!(
         run.summary["alerts_emitted"].as_u64(),
@@ -204,7 +252,7 @@ fn assert_alert_count(run: &RunOutput, kind: &str, count: usize) {
 #[test]
 fn normal_and_protocol_edge_fixtures_reconcile_and_match_across_modes() {
     let normal_inline = run_fixture("normal.pcap", false, true);
-    let normal_pipeline = run_fixture("normal.pcap", true, true);
+    let normal_pipeline = run_fixture_with_options("normal.pcap", true, true, true);
     assert_accounting("normal.pcap", &normal_inline, false);
     assert_accounting("normal.pcap", &normal_pipeline, true);
     assert_alert_count(&normal_inline, "port_scan", 0);
@@ -242,7 +290,7 @@ fn normal_and_protocol_edge_fixtures_reconcile_and_match_across_modes() {
     );
 
     let edges_inline = run_fixture("protocol-edges.pcap", false, true);
-    let edges_pipeline = run_fixture("protocol-edges.pcap", true, false);
+    let edges_pipeline = run_fixture_with_options("protocol-edges.pcap", true, false, true);
     assert_accounting("protocol-edges.pcap", &edges_inline, false);
     assert_accounting("protocol-edges.pcap", &edges_pipeline, true);
     assert_eq!(
@@ -253,35 +301,119 @@ fn normal_and_protocol_edge_fixtures_reconcile_and_match_across_modes() {
     assert!(edges_inline.stdout.contains("VLAN:100/200"));
     assert!(edges_inline.stdout.contains("ICMP "));
     assert!(edges_inline.stdout.contains("ICMPv6 "));
+    assert!(edges_inline.stdout.contains("Malformed transport: 1"));
+    assert!(edges_inline.stdout.contains("Unsupported packets:  1"));
+    assert!(edges_inline.stdout.contains("Packet parse errors: 0"));
+    assert!(!edges_inline.stdout.contains("Success rate:"));
     assert!(edges_inline.stdout.contains("malformed transport:"));
     assert!(edges_inline.stdout.contains("unsupported protocol payload"));
 }
 
 #[test]
-fn anomaly_fixtures_emit_documented_inline_and_pipeline_alerts() {
+fn anomaly_fixtures_emit_versioned_inline_alerts_and_reject_pipeline_mode() {
     let scan_inline = run_fixture("port-scan.pcap", false, false);
-    let scan_pipeline = run_fixture("port-scan.pcap", true, false);
     assert_accounting("port-scan.pcap", &scan_inline, false);
-    assert_accounting("port-scan.pcap", &scan_pipeline, true);
     assert_alert_count(&scan_inline, "port_scan", 1);
-    assert_alert_count(&scan_pipeline, "port_scan", 2);
+    assert_pipeline_anomalies_rejected("port-scan.pcap");
     assert!(
         scan_inline.alerts[0]["description"]
             .as_str()
             .unwrap()
             .contains("4 ports")
     );
+    assert_eq!(scan_inline.alerts[0]["schema_version"], 1);
+    assert!(scan_inline.alerts[0]["ts"].as_f64().is_some());
+    assert_eq!(scan_inline.alerts[0]["kind"], "port_scan");
+    assert_eq!(scan_inline.alerts[0]["source_ip"], "192.0.2.50");
+    assert!(scan_inline.alerts[0]["target_ip"].is_null());
+    assert_eq!(scan_inline.alerts[0]["window_secs"], 10.0);
+    assert_eq!(scan_inline.alerts[0]["thresholds"]["unique_ports"], 4);
+    assert_eq!(scan_inline.alerts[0]["observed"]["unique_ports"], 4);
 
     let flood_inline = run_fixture("syn-flood.pcap", false, false);
-    let flood_pipeline = run_fixture("syn-flood.pcap", true, false);
     assert_accounting("syn-flood.pcap", &flood_inline, false);
-    assert_accounting("syn-flood.pcap", &flood_pipeline, true);
     assert_alert_count(&flood_inline, "syn_flood", 1);
-    assert_alert_count(&flood_pipeline, "syn_flood", 2);
+    assert_pipeline_anomalies_rejected("syn-flood.pcap");
     assert!(
         flood_inline.alerts[0]["description"]
             .as_str()
             .unwrap()
             .contains("8 syns, 8 sources")
     );
+    assert_eq!(flood_inline.alerts[0]["schema_version"], 1);
+    assert_eq!(flood_inline.alerts[0]["kind"], "syn_flood");
+    assert!(flood_inline.alerts[0]["source_ip"].is_null());
+    assert_eq!(flood_inline.alerts[0]["target_ip"], "203.0.113.200");
+    assert_eq!(flood_inline.alerts[0]["target_port"], 443);
+    assert_eq!(flood_inline.alerts[0]["window_secs"], 5.0);
+    assert_eq!(flood_inline.alerts[0]["thresholds"]["syn_count"], 8);
+    assert_eq!(flood_inline.alerts[0]["observed"]["unique_sources"], 8);
+}
+
+#[test]
+fn non_transport_frames_advance_the_anomaly_window() {
+    let fixture = std::fs::read(fixture_path("port-scan.pcap")).expect("fixture should exist");
+    let mut records = Vec::new();
+    let mut offset = 24; // classic PCAP global header
+    for _ in 0..4 {
+        let captured_len =
+            u32::from_le_bytes(fixture[offset + 8..offset + 12].try_into().unwrap()) as usize;
+        let end = offset + 16 + captured_len;
+        records.push(&fixture[offset..end]);
+        offset = end;
+    }
+    let first_second = u32::from_le_bytes(records[0][..4].try_into().unwrap());
+    let temp_dir = TempRunDir::new("anomaly-watermark");
+
+    for (label, malformed) in [("unsupported", false), ("malformed", true)] {
+        let mut future_record = records[0].to_vec();
+        future_record[..4].copy_from_slice(&(first_second + 100).to_le_bytes());
+        if malformed {
+            future_record[8..12].copy_from_slice(&10u32.to_le_bytes());
+            future_record.truncate(16 + 10); // incomplete Ethernet header
+        } else {
+            future_record[28..30].copy_from_slice(&0x9999u16.to_be_bytes());
+        }
+
+        let mut pcap = fixture[..24].to_vec();
+        for record in records.iter().take(3) {
+            pcap.extend_from_slice(record);
+        }
+        pcap.extend_from_slice(&future_record);
+        pcap.extend_from_slice(records[3]); // older fourth SYN would cross the threshold
+
+        let pcap_path = temp_dir.file(&format!("{label}.pcap"));
+        let alert_path = temp_dir.file(&format!("{label}-alerts.jsonl"));
+        let summary_path = temp_dir.file(&format!("{label}-summary.json"));
+        std::fs::write(&pcap_path, pcap).expect("test PCAP should be written");
+        let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+            .arg("--read-pcap")
+            .arg(&pcap_path)
+            .arg("--config")
+            .arg(Path::new(REPO_ROOT).join("examples/anomaly-demo.toml"))
+            .arg("--quiet")
+            .arg("--alerts-jsonl")
+            .arg(&alert_path)
+            .arg("--summary-json")
+            .arg(&summary_path)
+            .output()
+            .expect("netscope should run the timestamp regression fixture");
+        assert!(
+            output.status.success(),
+            "{label}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            std::fs::read_to_string(&alert_path).unwrap(),
+            "",
+            "{label} frame should expire older scan observations"
+        );
+
+        let summary: Value =
+            serde_json::from_slice(&std::fs::read(&summary_path).unwrap()).unwrap();
+        assert_eq!(summary["frames_read"], 5);
+        assert_eq!(summary["alerts_emitted"], 0);
+        assert_eq!(summary["packet_parse_errors"], u64::from(malformed));
+        assert_eq!(summary["unsupported_packets"], u64::from(!malformed));
+    }
 }

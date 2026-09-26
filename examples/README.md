@@ -40,13 +40,7 @@ Inline:
 ./target/release/netscope --read-pcap examples/pcaps/port-scan.pcap --config examples/anomaly-demo.toml --quiet --summary-json /tmp/netscope-port-scan-summary.json --alerts-jsonl /tmp/netscope-port-scan-alerts.jsonl
 ```
 
-Two-worker pipeline:
-
-```sh
-./target/release/netscope --read-pcap examples/pcaps/port-scan.pcap --config examples/anomaly-demo.toml --quiet --pipeline --workers 2 --summary-json /tmp/netscope-port-scan-pipeline-summary.json --alerts-jsonl /tmp/netscope-port-scan-pipeline-alerts.jsonl
-```
-
-The source sends 16 initial SYNs to one host on distinct ports within the configured 10-second window. The demo threshold is four unique destination ports. With the current per-worker detector, the inline run emits one `port_scan` alert and the two-worker run emits two, one from each shard. `alerts_emitted` in the summary matches the number of JSONL records. A legitimate inventory scan or burst of connection checks can meet the same rule, so this heuristic does not establish intent or malicious activity.
+The source sends 16 initial SYNs to one host on distinct ports within the configured 10-second window. The demo threshold is four unique destination ports, and the inline run emits one `port_scan` alert. Pipeline mode with the demo anomaly config is rejected before capture because anomaly thresholds are supported only in inline mode. A legitimate inventory scan or burst of connection checks can meet the same rule, so this heuristic does not establish intent or malicious activity.
 
 ## SYN flood heuristic
 
@@ -58,13 +52,7 @@ Inline:
 ./target/release/netscope --read-pcap examples/pcaps/syn-flood.pcap --config examples/anomaly-demo.toml --quiet --summary-json /tmp/netscope-syn-flood-summary.json --alerts-jsonl /tmp/netscope-syn-flood-alerts.jsonl
 ```
 
-Two-worker pipeline:
-
-```sh
-./target/release/netscope --read-pcap examples/pcaps/syn-flood.pcap --config examples/anomaly-demo.toml --quiet --pipeline --workers 2 --summary-json /tmp/netscope-syn-flood-pipeline-summary.json --alerts-jsonl /tmp/netscope-syn-flood-pipeline-alerts.jsonl
-```
-
-The trace contains 64 synthetic source addresses targeting `203.0.113.200:443` over 3.15 seconds. The fixture config requires at least eight SYNs and eight unique sources in a five-second window, with a 60-second cooldown. The inline run emits one `syn_flood` alert; the current two-worker pipeline emits one per shard (two total). Pipeline anomaly state is currently per worker, so alert totals can differ by mode. Packet counts and zero dispatch drops are still reconciled in the run summary. Packet-only evidence cannot show whether a server was reachable, how many handshakes completed, or whether a real service was impaired.
+The trace contains 64 synthetic source addresses targeting `203.0.113.200:443` over 3.15 seconds. The fixture config requires at least eight SYNs and eight unique sources in a five-second window, with a 60-second cooldown. The inline run emits one `syn_flood` alert. Pipeline mode with the demo anomaly config is rejected before capture because anomaly thresholds are supported only in inline mode. Packet-only evidence cannot show whether a server was reachable, how many handshakes completed, or whether a real service was impaired.
 
 ## Parser boundary spot-check
 
@@ -74,4 +62,4 @@ Run the supplementary edge fixture with:
 ./target/release/netscope --read-pcap examples/pcaps/protocol-edges.pcap --quiet --summary-json /tmp/netscope-protocol-edges-summary.json
 ```
 
-It contains IPv6 TCP, QinQ-tagged IPv4 UDP, ICMPv4, ICMPv6, a truncated TCP header, and an unsupported EtherType. The expected summary has six frames read, four packets with a transport header, and two malformed or unsupported packets. This checks the listed packet boundaries; it is not exhaustive protocol coverage.
+It contains IPv6 TCP, QinQ-tagged IPv4 UDP, ICMPv4, ICMPv6, a truncated TCP header, and an unsupported EtherType. The expected summary has six frames read, five network headers, four transport headers, zero link/network parse errors, one malformed transport header, one unsupported packet, and two malformed-or-unsupported packets in the compatibility aggregate. This checks the listed packet boundaries; it is not exhaustive protocol coverage.

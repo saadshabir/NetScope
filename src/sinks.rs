@@ -1,5 +1,6 @@
 use crate::flow::{ExpiredFlowCsvSink, ExpiredFlowEvent};
 use crate::jsonl::JsonlSink;
+use serde::Serialize;
 use std::path::Path;
 
 #[derive(Debug)]
@@ -19,18 +20,8 @@ impl AlertJsonlSink {
         })
     }
 
-    pub fn write_alert(
-        &mut self,
-        ts: f64,
-        kind: &str,
-        description: &str,
-    ) -> Result<(), std::io::Error> {
-        let record = serde_json::json!({
-            "ts": ts,
-            "kind": kind,
-            "description": description,
-        });
-        self.sink.write(&record).map_err(|err| {
+    pub fn write_alert<T: Serialize>(&mut self, alert: &T) -> Result<(), std::io::Error> {
+        self.sink.write(alert).map_err(|err| {
             std::io::Error::new(err.kind(), format!("alert write error: {}", err))
         })?;
         self.sink.flush().map_err(|err| {
@@ -170,15 +161,10 @@ impl OutputSinks {
         self.expired_flows.enabled()
     }
 
-    pub fn write_alert(
-        &mut self,
-        ts: f64,
-        kind: &str,
-        description: &str,
-    ) -> Result<(), std::io::Error> {
+    pub fn write_alert<T: Serialize>(&mut self, alert: &T) -> Result<(), std::io::Error> {
         let mut disable_alerts = false;
         if let Some(sink) = self.alerts_jsonl.as_mut()
-            && let Err(err) = sink.write_alert(ts, kind, description)
+            && let Err(err) = sink.write_alert(alert)
         {
             self.errors
                 .push(format!("alerts jsonl output error: {err}"));

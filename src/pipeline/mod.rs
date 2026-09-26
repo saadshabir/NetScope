@@ -1,8 +1,9 @@
 //! Sharded capture pipeline.
 //!
 //! The pipeline splits packet processing across N worker threads ("shards").
-//! Each worker owns its own `FlowTracker` and `AnomalyDetector`, so the
-//! hot path is completely lock-free.
+//! Each worker owns its own `FlowTracker`, so the packet-processing hot path
+//! is lock-free. Anomaly detection is restricted to inline mode because
+//! per-worker thresholds would not represent global traffic.
 //!
 //! Architecture:
 //!
@@ -11,7 +12,7 @@
 //!   |
 //!   |-- extract 5-tuple hash → shard = hash % N
 //!   |
-//!   +--[crossbeam channel]--→ Worker 0  (parse, flow, anomaly)
+//!   +--[crossbeam channel]--→ Worker 0  (parse, flow)
 //!   +--[crossbeam channel]--→ Worker 1
 //!   ...
 //!   +--[crossbeam channel]--→ Worker N-1
@@ -154,7 +155,8 @@ pub struct PipelineConfig {
     pub web: WebConfig,
     /// Number of heavy-hitter candidates to track per worker tick.
     pub heavy_hitter_top_n: usize,
-    /// Pipeline alert JSONL file sink path.
+    /// Alert JSONL path. No records are produced in pipeline mode because
+    /// anomaly detection is rejected before capture starts.
     pub alerts_jsonl: Option<PathBuf>,
     /// Pipeline expired-flow JSONL file sink path.
     pub expired_flows_jsonl: Option<PathBuf>,
@@ -216,6 +218,13 @@ pub fn spawn(
     running: Arc<AtomicBool>,
     web_handle: Option<&web::server::WebHandle>,
 ) -> Result<PipelineHandle, std::io::Error> {
+    if config.analysis.anomalies.has_enabled_detector() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "pipeline mode does not support anomaly detection because thresholds would be evaluated per worker",
+        ));
+    }
+
     let num_workers =
         resolve_num_workers_for_flow_budget(config.num_workers, config.flow.max_flows);
 

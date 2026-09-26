@@ -164,7 +164,7 @@ fn run_read_pcap_test(
 
     if expect_parse_errors_zero {
         assert!(
-            stdout.contains("Parse errors:      0"),
+            stdout.contains("Packet parse errors: 0"),
             "stdout was: {}",
             stdout
         );
@@ -246,6 +246,11 @@ fn summary_json_accounts_for_zero_packet_offline_run() {
     assert_eq!(summary["frames_read"], 0);
     assert_eq!(summary["input_wire_bytes"], 0);
     assert_eq!(summary["packets_parsed"], 0);
+    assert_eq!(summary["packets_with_network_header"], 0);
+    assert_eq!(summary["packets_with_transport_header"], 0);
+    assert_eq!(summary["packet_parse_errors"], 0);
+    assert_eq!(summary["transport_parse_errors"], 0);
+    assert_eq!(summary["unsupported_packets"], 0);
     assert!(summary["elapsed_wall_seconds"].as_f64().unwrap() >= 0.0);
     assert!(summary["kernel_drops"].is_null());
     assert!(summary["interface_drops"].is_null());
@@ -281,8 +286,55 @@ fn summary_json_marks_truncated_transport_as_partial_and_malformed() {
             .expect("summary JSON should parse");
     assert_eq!(summary["frames_read"], 1);
     assert_eq!(summary["packets_parsed"], 1);
+    assert_eq!(summary["packets_with_network_header"], 1);
     assert_eq!(summary["packets_with_transport_header"], 0);
+    assert_eq!(summary["packet_parse_errors"], 0);
+    assert_eq!(summary["transport_parse_errors"], 1);
+    assert_eq!(summary["unsupported_packets"], 0);
     assert_eq!(summary["malformed_or_unsupported_packets"], 1);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Packets classified:  1"));
+    assert!(stdout.contains("Malformed transport: 1"));
+
+    let _ = std::fs::remove_file(pcap_path);
+    let _ = std::fs::remove_file(summary_path);
+}
+
+#[test]
+fn summary_json_counts_truncated_network_as_a_packet_parse_error() {
+    let pcap_path = temp_path("truncated-network-summary");
+    let summary_path = pcap_path.with_extension("json");
+    let mut packet = make_ipv4_packet();
+    packet.truncate(10);
+    write_test_pcap(&pcap_path, 101, &packet);
+
+    let output = run_netscope(&[
+        "--read-pcap",
+        pcap_path.to_str().unwrap(),
+        "--quiet",
+        "--summary-json",
+        summary_path.to_str().unwrap(),
+    ]);
+    assert!(
+        output.status.success(),
+        "expected the malformed frame to be accounted for, got stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let summary: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&summary_path).expect("summary JSON should exist"))
+            .expect("summary JSON should parse");
+    assert_eq!(summary["frames_read"], 1);
+    assert_eq!(summary["packets_parsed"], 0);
+    assert_eq!(summary["packets_with_network_header"], 0);
+    assert_eq!(summary["packet_parse_errors"], 1);
+    assert_eq!(summary["transport_parse_errors"], 0);
+    assert_eq!(summary["unsupported_packets"], 0);
+    assert_eq!(summary["malformed_or_unsupported_packets"], 1);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Packets classified:  0"));
+    assert!(stdout.contains("Packet parse errors: 1"));
+    assert!(!stdout.contains("Success rate:"));
 
     let _ = std::fs::remove_file(pcap_path);
     let _ = std::fs::remove_file(summary_path);

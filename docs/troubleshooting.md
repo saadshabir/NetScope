@@ -175,7 +175,7 @@ Note: `sample_rate = 0` disables live packet samples only; stats and alerts can 
 1. **Anomalies not enabled** -- Ensure `--anomalies` flag is present or `analysis.anomalies.enabled = true`.
 2. **Thresholds too high** -- Lower `syn_threshold` or `unique_ports_threshold` for testing.
 3. **Cooldown active** -- After an alert fires, subsequent alerts for the same key are suppressed for `cooldown_secs`.
-4. **Pipeline mode** -- Thresholds are per-shard. Traffic distributed across shards may not exceed thresholds on any individual shard. See [Pipeline Caveats](pipeline.md#known-caveats).
+4. **Pipeline mode** -- Anomaly detection is unsupported in pipeline mode. NetScope rejects the combination before capture; disable pipeline or set `[analysis.anomalies].enabled = false`.
 
 ## Flow Export is Empty
 

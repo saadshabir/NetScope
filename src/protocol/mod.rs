@@ -693,6 +693,20 @@ mod tests {
     }
 
     #[test]
+    fn pcap_link_type_mapping_covers_supported_values_and_rejects_unknowns() {
+        assert_eq!(LinkType::from_pcap_value(0), LinkType::LoopbackNull);
+        assert_eq!(LinkType::from_pcap_value(1), LinkType::Ethernet);
+        assert_eq!(LinkType::from_pcap_value(12), LinkType::RawIp);
+        assert_eq!(LinkType::from_pcap_value(101), LinkType::RawIp);
+        assert_eq!(LinkType::from_pcap_value(108), LinkType::LoopbackLoop);
+        assert_eq!(LinkType::from_pcap_value(113), LinkType::LinuxSll);
+        assert_eq!(LinkType::from_pcap_value(276), LinkType::Unsupported(276));
+
+        let result = parse_packet_with_linktype(&[], LinkType::Unsupported(276));
+        assert!(matches!(result, Err(ParseError::InvalidHeader(_))));
+    }
+
+    #[test]
     fn malformed_tcp_and_udp_keep_partial_network_decode_and_are_classified() {
         let truncated_tcp = make_ipv4_with_payload(6, &[0x30, 0x39, 0x00, 0x50]);
         let tcp = parse_packet_with_linktype(&truncated_tcp, LinkType::RawIp).unwrap();
@@ -717,6 +731,37 @@ mod tests {
         let parsed = parse_packet_with_linktype(&fragment, LinkType::RawIp).unwrap();
 
         assert!(matches!(parsed.network, Some(NetworkHeader::Ipv4(_))));
+        assert!(parsed.transport.is_none());
+        assert!(parsed.transport_parse_error.is_none());
+        assert!(parsed.unsupported);
+    }
+
+    #[test]
+    fn initial_ipv4_fragment_with_complete_tcp_header_remains_trackable() {
+        let mut fragment = make_tcp_ipv4_payload([192, 0, 2, 10], [192, 0, 2, 20], 12000, 443);
+        fragment[6..8].copy_from_slice(&0x2000u16.to_be_bytes()); // MF, offset zero
+
+        let parsed = parse_packet_with_linktype(&fragment, LinkType::RawIp).unwrap();
+
+        assert!(matches!(parsed.network, Some(NetworkHeader::Ipv4(_))));
+        assert!(matches!(parsed.transport, Some(TransportHeader::Tcp(_))));
+        assert!(!parsed.unsupported);
+        assert!(crate::flow::flow_key_from_packet(&parsed).is_some());
+    }
+
+    #[test]
+    fn non_initial_ipv6_fragment_is_unsupported_without_malformed_transport() {
+        let mut fragment = vec![0u8; 40 + 8 + 4];
+        fragment[0] = 0x60;
+        fragment[4..6].copy_from_slice(&12u16.to_be_bytes());
+        fragment[6] = 44; // Fragment extension header
+        fragment[7] = 64;
+        fragment[40] = 6; // Fragment payload would be TCP
+        fragment[42..44].copy_from_slice(&(1u16 << 3).to_be_bytes());
+
+        let parsed = parse_packet_with_linktype(&fragment, LinkType::RawIp).unwrap();
+
+        assert!(matches!(parsed.network, Some(NetworkHeader::Ipv6(_))));
         assert!(parsed.transport.is_none());
         assert!(parsed.transport_parse_error.is_none());
         assert!(parsed.unsupported);
@@ -753,6 +798,24 @@ mod tests {
         ));
 
         let parsed = parse_packet_with_linktype(&pkt, LinkType::LoopbackNull).unwrap();
+
+        assert!(matches!(parsed.link, LinkHeader::Loopback(_)));
+        assert!(matches!(parsed.network, Some(NetworkHeader::Ipv4(_))));
+        assert!(matches!(parsed.transport, Some(TransportHeader::Tcp(_))));
+    }
+
+    #[test]
+    fn parse_loopback_loop_ipv4_tcp() {
+        let mut pkt = Vec::new();
+        pkt.extend_from_slice(&2u32.to_be_bytes()); // AF_INET, network byte order for DLT_LOOP
+        pkt.extend_from_slice(&make_tcp_ipv4_payload(
+            [127, 0, 0, 1],
+            [127, 0, 0, 1],
+            50001,
+            8080,
+        ));
+
+        let parsed = parse_packet_with_linktype(&pkt, LinkType::LoopbackLoop).unwrap();
 
         assert!(matches!(parsed.link, LinkHeader::Loopback(_)));
         assert!(matches!(parsed.network, Some(NetworkHeader::Ipv4(_))));

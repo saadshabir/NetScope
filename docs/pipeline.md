@@ -19,9 +19,9 @@ flowchart TD
         CHN["Channel N-1"]
     end
 
-    CH0 --> W0["Worker 0\nparse + flow + anomaly"]
-    CH1 --> W1["Worker 1\nparse + flow + anomaly"]
-    CHN --> WN["Worker N-1\nparse + flow + anomaly"]
+    CH0 --> W0["Worker 0\nparse + flow"]
+    CH1 --> W1["Worker 1\nparse + flow"]
+    CHN --> WN["Worker N-1\nparse + flow"]
 
     W0 -->|events| AGG["Aggregator Thread"]
     W1 -->|events| AGG
@@ -35,9 +35,9 @@ flowchart TD
 
 1. **Capture thread** reads raw packets from libpcap on the main thread.
 2. **Shard routing** extracts the 5-tuple (protocol, src IP, src port, dst IP, dst port) from raw bytes with lightweight header walking (including common IPv6 extension headers) -- no full parse required. The hash determines which worker receives the packet: `shard = hash(5-tuple) % num_workers`.
-3. **Workers** each own their own `FlowTracker` and `AnomalyDetector`. Parsing, flow tracking, TCP analysis, and anomaly detection all happen lock-free within each shard.
-4. **Aggregator** collects per-shard tick data, merges it into global statistics, and forwards events to the CLI and web dashboard.
-5. **Web server** batches each merged tick with sampled packets and alerts into a single websocket `frame`, and replays the latest frame after reconnect or lag recovery.
+3. **Workers** each own their own `FlowTracker`. Parsing, flow tracking, and TCP analysis happen within each shard. Pipeline mode rejects runs with anomaly detection enabled because shard-local thresholds do not match inline global thresholds.
+4. **Aggregator** collects per-shard tick data, merges it into global statistics, and forwards packet and statistics events to the CLI and web dashboard.
+5. **Web server** batches each merged tick with sampled packets into a single websocket `frame`, and replays the latest frame after reconnect or lag recovery.
 
 For dashboard top flows, each worker uses a fixed-size streaming heavy-hitters tracker during the tick window to identify candidate flows without scanning the entire flow table every frame. Before emitting the shard tick, the worker resolves exact byte deltas for those candidates from its `FlowTracker`, so displayed web rates remain exact even though candidate selection is approximate. When deep TCP analysis is disabled, this candidate path now uses the same compact internal flow-key representation as scale-mode flow storage.
 
@@ -104,15 +104,9 @@ Flow exports (`--export-json`, `--export-csv`) in pipeline mode contain the merg
 
 ## Known Caveats
 
-### Anomaly detection thresholds are per-shard
+### Anomaly detection is unavailable in pipeline mode
 
-Each worker shard has its own `AnomalyDetector` instance. Since traffic for different source IPs can land on different shards, detection thresholds (e.g., SYN flood `syn_threshold = 200`) are evaluated per-shard, not globally. This means:
-
-- A distributed SYN flood spread across all shards may not trigger alerts if each shard sees fewer SYNs than the threshold individually.
-- Port scans that hit many destinations will distribute across shards, reducing per-shard counts.
-- Even traffic targeting one destination can spread across shards because routing hashes the full flow tuple, including the source endpoint.
-
-Pipeline mode can miss an alert that inline mode would emit for the same packets. Use inline mode when these alert decisions matter; reducing thresholds by worker count does not make the modes equivalent.
+NetScope rejects `--pipeline` when `[analysis.anomalies].enabled` and at least one detector are enabled. This check happens before opening the capture source. Anomaly decisions are supported only in inline mode; the implementation does not silently apply per-shard thresholds or claim destination affinity from flow hashing.
 
 ### Flow budget
 
