@@ -397,19 +397,35 @@ FIXTURES = (
 
 EXPECTED_PACKET_ACCOUNTING = {
     "normal.pcap": {
+        "packets_with_network_header": 8,
         "packets_with_transport_header": 8,
+        "packet_parse_errors": 0,
+        "transport_parse_errors": 0,
+        "unsupported_packets": 0,
         "malformed_or_unsupported_packets": 0,
     },
     "port-scan.pcap": {
+        "packets_with_network_header": 16,
         "packets_with_transport_header": 16,
+        "packet_parse_errors": 0,
+        "transport_parse_errors": 0,
+        "unsupported_packets": 0,
         "malformed_or_unsupported_packets": 0,
     },
     "syn-flood.pcap": {
+        "packets_with_network_header": 64,
         "packets_with_transport_header": 64,
+        "packet_parse_errors": 0,
+        "transport_parse_errors": 0,
+        "unsupported_packets": 0,
         "malformed_or_unsupported_packets": 0,
     },
     "protocol-edges.pcap": {
+        "packets_with_network_header": 5,
         "packets_with_transport_header": 4,
+        "packet_parse_errors": 0,
+        "transport_parse_errors": 1,
+        "unsupported_packets": 1,
         "malformed_or_unsupported_packets": 2,
     },
 }

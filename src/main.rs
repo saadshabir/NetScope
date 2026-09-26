@@ -322,13 +322,20 @@ fn print_run_summary(summary: &RunSummary) {
     }
     println!("  Packets captured:  {}", summary.frames_read);
     println!("  Input wire bytes:   {}", summary.input_wire_bytes);
-    println!("  Packets parsed:     {}", summary.packets_parsed);
+    println!("  Packets classified:  {}", summary.packets_parsed);
     println!(
-        "  Transport headers:  {}",
-        summary.packets_with_transport_header
+        "  Network headers:    {}",
+        summary.packets_with_network_header
     );
     println!(
-        "  Malformed/unsupported: {}",
+        "  Transport headers:   {}",
+        summary.packets_with_transport_header
+    );
+    println!("  Packet parse errors: {}", summary.packet_parse_errors);
+    println!("  Malformed transport: {}", summary.transport_parse_errors);
+    println!("  Unsupported packets:  {}", summary.unsupported_packets);
+    println!(
+        "  Malformed/unsupported total: {}",
         summary.malformed_or_unsupported_packets
     );
     if let Some(dispatched) = summary.dispatched_frames {
@@ -344,21 +351,6 @@ fn print_run_summary(summary: &RunSummary) {
         println!(
             "  Worker failures:    {}",
             summary.worker_failures.unwrap_or(0)
-        );
-    } else {
-        println!(
-            "  Parse errors:      {}",
-            summary.malformed_or_unsupported_packets
-        );
-        println!(
-            "  Success rate:       {:.1}%",
-            if summary.frames_read > 0 {
-                (summary.frames_read - summary.malformed_or_unsupported_packets) as f64
-                    / summary.frames_read as f64
-                    * 100.0
-            } else {
-                0.0
-            }
         );
     }
     println!("  Flows created:      {}", summary.flows_created);
@@ -1064,6 +1056,10 @@ fn run_capture_inline(
                 match protocol::parse_packet_with_linktype(raw_data, link_type) {
                     Ok(parsed) => {
                         accounting.packets_parsed = accounting.packets_parsed.saturating_add(1);
+                        if parsed.network.is_some() {
+                            accounting.packets_with_network_header =
+                                accounting.packets_with_network_header.saturating_add(1);
+                        }
                         if parsed.transport.is_some() {
                             accounting.packets_with_transport_header =
                                 accounting.packets_with_transport_header.saturating_add(1);
@@ -1072,6 +1068,14 @@ fn run_capture_inline(
                             accounting.malformed_or_unsupported_packets = accounting
                                 .malformed_or_unsupported_packets
                                 .saturating_add(1);
+                        }
+                        if parsed.transport_parse_error.is_some() {
+                            accounting.transport_parse_errors =
+                                accounting.transport_parse_errors.saturating_add(1);
+                        }
+                        if parsed.unsupported {
+                            accounting.unsupported_packets =
+                                accounting.unsupported_packets.saturating_add(1);
                         }
                         if let Some(err) = parsed.transport_parse_error.as_ref() {
                             tracing::debug!(error = %err, "malformed transport header on packet #{}", packet_count);
@@ -1083,11 +1087,7 @@ fn run_capture_inline(
                                 .alerts_emitted
                                 .saturating_add(alerts.len() as u64);
                             for alert in &alerts {
-                                if let Err(err) = output_sinks.write_alert(
-                                    alert.ts,
-                                    alert.kind.as_str(),
-                                    &alert.description,
-                                ) {
+                                if let Err(err) = output_sinks.write_alert(alert) {
                                     accounting.output_errors.extend(output_sinks.take_errors());
                                     accounting.output_errors.push(err.to_string());
                                     return Err(Box::new(err));
@@ -1098,11 +1098,7 @@ fn run_capture_inline(
                                     && handle
                                         .event_tx
                                         .try_send(web::messages::CaptureEvent::Alert(
-                                            web::messages::AlertMsg {
-                                                ts: alert.ts,
-                                                kind: alert.kind.as_str().to_string(),
-                                                description: alert.description.clone(),
-                                            },
+                                            web::messages::AlertMsg::from(alert),
                                         ))
                                         .is_err()
                                 {
@@ -1153,6 +1149,9 @@ fn run_capture_inline(
                         }
                     }
                     Err(e) => {
+                        anomaly_detector.advance_time(timestamp);
+                        accounting.packet_parse_errors =
+                            accounting.packet_parse_errors.saturating_add(1);
                         accounting.malformed_or_unsupported_packets = accounting
                             .malformed_or_unsupported_packets
                             .saturating_add(1);
@@ -1556,12 +1555,16 @@ fn run_capture_pipeline(
             .saturating_sub(worker_stats.processed_frames),
     );
     accounting.packets_parsed = worker_stats.parsed_packets;
+    accounting.packets_with_network_header = worker_stats.packets_with_network_header;
     accounting.packets_with_transport_header = worker_stats.packets_with_transport_header;
+    accounting.packet_parse_errors = worker_stats.packet_parse_errors;
+    accounting.transport_parse_errors = worker_stats.transport_parse_errors;
+    accounting.unsupported_packets = worker_stats.unsupported_packets;
     accounting.malformed_or_unsupported_packets = worker_stats.malformed_or_unsupported_packets;
     accounting.flows_created = worker_stats.flows.created;
     accounting.flows_expired = worker_stats.flows.expired;
     accounting.flows_evicted = worker_stats.flows.evicted;
-    accounting.alerts_emitted = pipe.aggregator.alert_count();
+    accounting.alerts_emitted = 0;
     accounting
         .output_errors
         .extend(pipe.aggregator.output_errors());
@@ -1663,6 +1666,12 @@ impl RuntimeConfig {
         if self.pipeline.enabled && self.pipeline.channel_capacity == 0 {
             return Err(config::ConfigError::Validation(
                 "pipeline.channel_capacity must be > 0".into(),
+            ));
+        }
+
+        if self.pipeline.enabled && self.analysis.anomalies.has_enabled_detector() {
+            return Err(config::ConfigError::Validation(
+                "pipeline mode does not support anomaly detection because thresholds would be evaluated per worker; disable pipeline or set analysis.anomalies.enabled = false".into(),
             ));
         }
 

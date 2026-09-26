@@ -177,16 +177,16 @@ Specify the number of worker threads:
 sudo netscope --pipeline --workers 4 --quiet --stats
 ```
 
-Pipeline mode with the web dashboard:
+Pipeline mode with the web dashboard and anomaly detection disabled:
 
 ```bash
-sudo netscope --pipeline --web --quiet --anomalies
+sudo netscope --pipeline --web --quiet --no-anomalies
 ```
 
-Pipeline mode with alert and expired-flow JSONL outputs:
+Pipeline mode with expired-flow JSONL output:
 
 ```bash
-sudo netscope --pipeline --anomalies --alerts-jsonl alerts.jsonl --expired-flows-jsonl expired-flows.jsonl --quiet --stats
+sudo netscope --pipeline --expired-flows-jsonl expired-flows.jsonl --quiet --stats
 ```
 
 Pipeline mode with expired-flow CSV output:

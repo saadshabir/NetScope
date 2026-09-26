@@ -13,7 +13,11 @@ pub struct RunAccounting {
     pub frames_read: u64,
     pub input_wire_bytes: u64,
     pub packets_parsed: u64,
+    pub packets_with_network_header: u64,
     pub packets_with_transport_header: u64,
+    pub packet_parse_errors: u64,
+    pub transport_parse_errors: u64,
+    pub unsupported_packets: u64,
     pub malformed_or_unsupported_packets: u64,
     pub dispatched_frames: Option<u64>,
     pub dispatch_drops: Option<u64>,
@@ -41,10 +45,18 @@ pub struct RunSummary {
     pub effective_config: EffectiveConfig,
     pub frames_read: u64,
     pub input_wire_bytes: u64,
-    /// Frames with a recognized link header; a malformed transport header can
-    /// still be partially parsed and is counted separately below.
+    /// Frames for which the parser returned a ParsedPacket. Unsupported
+    /// payloads can still be classified; link/network parse errors are separate.
     pub packets_parsed: u64,
+    /// Frames with a recognized network header, including ARP, IPv4, or IPv6.
+    pub packets_with_network_header: u64,
     pub packets_with_transport_header: u64,
+    /// Frames that failed link or network parsing before a ParsedPacket existed.
+    pub packet_parse_errors: u64,
+    /// Frames with a recognized network header and malformed supported L4 data.
+    pub transport_parse_errors: u64,
+    /// Frames with an unsupported EtherType, IP protocol, network payload, or fragment.
+    pub unsupported_packets: u64,
     pub malformed_or_unsupported_packets: u64,
     /// Pipeline-only counters are null in inline mode.
     pub dispatched_frames: Option<u64>,
@@ -166,7 +178,11 @@ impl RunSummary {
             frames_read: accounting.frames_read,
             input_wire_bytes: accounting.input_wire_bytes,
             packets_parsed: accounting.packets_parsed,
+            packets_with_network_header: accounting.packets_with_network_header,
             packets_with_transport_header: accounting.packets_with_transport_header,
+            packet_parse_errors: accounting.packet_parse_errors,
+            transport_parse_errors: accounting.transport_parse_errors,
+            unsupported_packets: accounting.unsupported_packets,
             malformed_or_unsupported_packets: accounting.malformed_or_unsupported_packets,
             dispatched_frames: accounting.dispatched_frames,
             dispatch_drops: accounting.dispatch_drops,

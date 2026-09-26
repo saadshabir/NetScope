@@ -1,15 +1,14 @@
-//! Per-shard worker: owns a `FlowTracker` and `AnomalyDetector`, processes
-//! packets from a bounded channel, and emits events to the aggregator.
+//! Per-shard worker: owns a `FlowTracker`, processes packets from a bounded
+//! channel, and emits events to the aggregator.
 
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::analysis::anomaly::AnomalyDetector;
 use crate::config::{AnalysisConfig, FlowConfig, WebConfig};
 use crate::flow::{ExpiredFlowEvent, FlowDelta, FlowSnapshot, FlowTracker, FlowTrackerStats};
 use crate::protocol;
-use crate::web::messages::{AlertMsg, PacketSample, StoredPacket};
+use crate::web::messages::{PacketSample, StoredPacket};
 
 use super::top_flows::SpaceSavingTopFlows;
 use super::{OwnedPacket, PacketBufReturner};
@@ -23,8 +22,6 @@ pub enum WorkerEvent {
     Packet(PacketSample),
     /// A stored packet for the detail ring buffer.
     PacketStored(StoredPacket),
-    /// An anomaly alert.
-    Alert(AlertMsg),
     /// Flows expired due to timeout or max-flow eviction.
     ExpiredFlows(Vec<ExpiredFlowEvent>),
     /// Worker is shutting down; final flow snapshot from this shard.
@@ -53,7 +50,11 @@ pub struct ShardShutdown {
 pub struct WorkerRunStats {
     pub processed_frames: u64,
     pub parsed_packets: u64,
+    pub packets_with_network_header: u64,
     pub packets_with_transport_header: u64,
+    pub packet_parse_errors: u64,
+    pub transport_parse_errors: u64,
+    pub unsupported_packets: u64,
     pub malformed_or_unsupported_packets: u64,
     pub flows: FlowTrackerStats,
 }
@@ -62,8 +63,6 @@ pub struct Worker {
     shard_id: usize,
     link_type: protocol::LinkType,
     flow_tracker: FlowTracker,
-    anomaly_detector: AnomalyDetector,
-    analysis_cfg: AnalysisConfig,
     web_cfg: WebConfig,
     heavy_hitter_top_n: usize,
     buffer_returner: PacketBufReturner,
@@ -109,14 +108,10 @@ impl Worker {
             analysis_cfg.retrans,
             analysis_cfg.out_of_order,
         );
-        let anomaly_detector = AnomalyDetector::new(analysis_cfg.anomalies.clone());
-
         Worker {
             shard_id,
             link_type,
             flow_tracker,
-            anomaly_detector,
-            analysis_cfg,
             web_cfg,
             heavy_hitter_top_n,
             buffer_returner,
@@ -203,47 +198,29 @@ impl Worker {
         match protocol::parse_packet_with_linktype(&pkt.data, self.link_type) {
             Ok(parsed) => {
                 self.run_stats.parsed_packets = self.run_stats.parsed_packets.saturating_add(1);
+                if parsed.network.is_some() {
+                    self.run_stats.packets_with_network_header =
+                        self.run_stats.packets_with_network_header.saturating_add(1);
+                }
                 if parsed.transport.is_some() {
                     self.run_stats.packets_with_transport_header = self
                         .run_stats
                         .packets_with_transport_header
                         .saturating_add(1);
                 }
+                if parsed.transport_parse_error.is_some() {
+                    self.run_stats.transport_parse_errors =
+                        self.run_stats.transport_parse_errors.saturating_add(1);
+                }
+                if parsed.unsupported {
+                    self.run_stats.unsupported_packets =
+                        self.run_stats.unsupported_packets.saturating_add(1);
+                }
                 if parsed.transport_parse_error.is_some() || parsed.unsupported {
                     self.run_stats.malformed_or_unsupported_packets = self
                         .run_stats
                         .malformed_or_unsupported_packets
                         .saturating_add(1);
-                }
-
-                // Anomaly detection
-                if self.analysis_cfg.anomalies.enabled {
-                    match crate::maybe_analyze_anomaly(&mut self.anomaly_detector, pkt.ts, &parsed)
-                    {
-                        Ok(alerts) => {
-                            for alert in alerts {
-                                // Count an emitted alert only when it was
-                                // successfully handed to the aggregator.
-                                if self
-                                    .send_event(
-                                        agg_tx,
-                                        WorkerEvent::Alert(AlertMsg {
-                                            ts: alert.ts,
-                                            kind: alert.kind.as_str().to_string(),
-                                            description: alert.description,
-                                        }),
-                                    )
-                                    .is_err()
-                                {
-                                    return;
-                                }
-                                // The event has reached the aggregator queue.
-                            }
-                        }
-                        Err(err) => {
-                            tracing::error!(error = %err, "anomaly detector failed");
-                        }
-                    }
                 }
 
                 // Flow tracking
@@ -299,6 +276,8 @@ impl Worker {
                 }
             }
             Err(e) => {
+                self.run_stats.packet_parse_errors =
+                    self.run_stats.packet_parse_errors.saturating_add(1);
                 self.run_stats.malformed_or_unsupported_packets = self
                     .run_stats
                     .malformed_or_unsupported_packets

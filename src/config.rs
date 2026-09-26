@@ -201,6 +201,12 @@ pub struct AnomalyConfig {
     pub port_scan: PortScanConfig,
 }
 
+impl AnomalyConfig {
+    pub fn has_enabled_detector(&self) -> bool {
+        self.enabled && (self.syn_flood.enabled || self.port_scan.enabled)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SynFloodConfig {

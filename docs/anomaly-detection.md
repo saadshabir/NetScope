@@ -58,14 +58,14 @@ Alerts are:
 
 1. **Printed to stdout** in the format `[alert] <description>`.
 2. **Sent to the web dashboard** (if enabled) in real time.
-3. **Written to a JSONL file** (if `--alerts-jsonl` is specified, in both inline and pipeline modes).
+3. **Written to a JSONL file** (if `--alerts-jsonl` is specified in inline mode).
 
 ### JSONL Format
 
 Each line in the alerts file is a JSON object:
 
 ```json
-{"ts":1706123456.789,"kind":"syn_flood","description":"SYN flood suspected: 250 syns, 60 sources to 10.0.0.1:443"}
+{"schema_version":1,"ts":1706123456.789,"kind":"syn_flood","source_ip":null,"target_ip":"10.0.0.1","target_port":443,"window_secs":5.0,"thresholds":{"syn_count":200,"unique_sources":50,"unique_ports":null,"unique_hosts":null},"observed":{"syn_count":250,"unique_sources":60,"unique_ports":null,"unique_hosts":null},"description":"SYN flood suspected: 250 syns, 60 sources to 10.0.0.1:443"}
 ```
 
 | Field | Type | Description |
@@ -73,6 +73,8 @@ Each line in the alerts file is a JSON object:
 | `ts` | float | Timestamp (seconds since Unix epoch, microsecond precision). |
 | `kind` | string | Alert type: `"syn_flood"` or `"port_scan"`. |
 | `description` | string | Human-readable alert description. |
+
+`schema_version` is `1`. The existing `ts`, `kind`, and `description` fields remain unchanged; added fields provide structured source/target context, the configured window and thresholds, and observed counts. Fields that do not apply to an alert kind are `null`. Consumers that require an exact set of keys should accept the additional properties before upgrading.
 
 ### Web Dashboard Alerts
 
@@ -82,16 +84,11 @@ Alerts appear in the "Alerts" tab of the web dashboard with timestamp, kind, and
 
 After an alert fires for a specific target (SYN flood) or source (port scan), subsequent alerts for the same key are suppressed for `cooldown_secs`. This prevents alert floods during sustained attacks.
 
-Cooldown timers are cleaned up every 30 seconds. An inactive key's event queue can retain expired entries until that key receives another packet; this state limit is scheduled for correction in Phase 3.2.
+The detector uses the greatest captured-frame timestamp seen so far as its event-time watermark, including malformed and unsupported frames, so out-of-order PCAP timestamps do not move window or cooldown time backwards. Each key's queue is pruned when that key is observed, and a sweep every 30 seconds removes expired events and empty queues for inactive keys. Expired cooldowns stop suppressing alerts immediately and are removed from the map during a sweep. Stale entries can remain until the next sweep after their event window or cooldown expires.
 
-## Pipeline Mode Caveat
+## Pipeline Mode
 
-In [pipeline mode](pipeline.md), each worker shard has its own anomaly detector. Thresholds are evaluated per-shard, not globally. This means:
-
-- Distributed attacks that spread across shards may not trigger alerts if no single shard sees enough traffic to exceed the threshold.
-- Traffic targeting one destination can still spread across shards because the router hashes the full flow tuple, including the source endpoint.
-
-Pipeline mode can miss an alert that inline mode would emit for the same packets. Use inline mode when these alert decisions matter; reducing thresholds by worker count does not make the modes equivalent.
+Anomaly detection is supported in inline mode only. Pipeline workers shard flows by the full canonical flow tuple, so per-worker detectors cannot reproduce the same global thresholds. NetScope rejects pipeline runs when anomaly detection is enabled, before capture starts. Disable pipeline or set `[analysis.anomalies].enabled = false` to continue. Lowering thresholds by worker count does not provide equivalent decisions.
 
 ## Configuration Summary
 

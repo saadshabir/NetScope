@@ -11,7 +11,7 @@ NetScope uses several performance-focused design choices on the hot path:
 - **Zero-copy parsing** -- protocol headers are parsed as views over the original byte slice, with no allocations or copies.
 - **Fast hashing** -- hot-path flow/anomaly maps use `ahash` (`AHashMap`/`AHashSet`) to reduce per-lookup hashing cost.
 - **Partial top-N selection** -- uses `select_nth_unstable_by` to partition the top-N elements in O(F) time, then sorts only that slice.
-- **Pipeline sharding (optional)** -- in `--pipeline` mode, each worker owns its own `FlowTracker` and `AnomalyDetector`, avoiding shared hot-path contention.
+- **Pipeline sharding (optional)** -- in `--pipeline` mode, each worker owns its own `FlowTracker`, avoiding shared hot-path contention. Anomaly detection is inline-only because worker-local thresholds would not match global thresholds.
 - **Web tick batching** -- the web server ships one merged frame per tick (stats + sampled packets + alerts) and resyncs lagged clients by sending only the latest frame.
 - **Pipeline top-flows fast path** -- workers use a fixed-size SpaceSaving-style tracker to choose a bounded candidate set, then recompute exact deltas for those candidates before building the dashboard payload.
 - **Scale-mode flow storage** -- when `analysis.rtt = false`, `analysis.retrans = false`, and `analysis.out_of_order = false`, flow tracking switches to compact split IPv4/IPv6 tables (`ScaleFlowEntry`) to reduce per-flow memory overhead.
@@ -103,7 +103,7 @@ immediate_mode = true
 - Lower `max_flows` to cap the flow table size.
 - Reduce `flow.timeout_secs` to expire flows sooner.
 - Lower `packet_buffer` to keep fewer packets in the web dashboard ring buffer.
-- Note: in pipeline mode, `max_flows` is per-shard, so the effective limit is `max_flows * num_workers`.
+- In pipeline mode, `max_flows` is a total budget split among worker shards. A busy shard can evict flows while another still has unused quota; pruning runs at most once per second.
 - For large flow-count runs, disable deep TCP analysis (`analysis.rtt = false`, `analysis.retrans = false`, `analysis.out_of_order = false`) to activate scale-mode flow storage.
 
 ### Memory validation

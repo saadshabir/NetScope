@@ -92,6 +92,59 @@ mod tests {
         frame
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn make_tcp_ethernet_frame(
+        src: [u8; 4],
+        dst: [u8; 4],
+        src_port: u16,
+        dst_port: u16,
+        seq: u32,
+        ack: u32,
+        flags: u8,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let mut frame = vec![
+            0x02, 0, 0, 0, 0, 1, // destination MAC
+            0x02, 0, 0, 0, 0, 2, // source MAC
+            0x08, 0x00, // IPv4
+            0x45, 0, // version, IHL, DSCP
+            0, 0, // total length, filled below
+            0, 1, 0, 0, // identification, flags/fragment offset
+            64, 6, 0, 0, // TTL, TCP, checksum
+            src[0], src[1], src[2], src[3], dst[0], dst[1], dst[2], dst[3],
+        ];
+        let ip_length = (20 + 20 + payload.len()) as u16;
+        frame[16..18].copy_from_slice(&ip_length.to_be_bytes());
+        frame.extend_from_slice(&src_port.to_be_bytes());
+        frame.extend_from_slice(&dst_port.to_be_bytes());
+        frame.extend_from_slice(&seq.to_be_bytes());
+        frame.extend_from_slice(&ack.to_be_bytes());
+        frame.extend_from_slice(&[0x50, flags]); // data offset and flags
+        frame.extend_from_slice(&4096u16.to_be_bytes()); // window
+        frame.extend_from_slice(&[0, 0, 0, 0]); // checksum and urgent pointer
+        frame.extend_from_slice(payload);
+        frame
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn observe_tcp_segment(
+        tracker: &mut FlowTracker,
+        ts: f64,
+        src: [u8; 4],
+        dst: [u8; 4],
+        src_port: u16,
+        dst_port: u16,
+        seq: u32,
+        ack: u32,
+        flags: u8,
+        payload: &[u8],
+    ) {
+        let frame = make_tcp_ethernet_frame(src, dst, src_port, dst_port, seq, ack, flags, payload);
+        let parsed = parse_packet_with_linktype(&frame, LinkType::Ethernet)
+            .expect("test TCP segment should parse");
+        tracker.observe(ts, frame.len() as u64, &parsed);
+    }
+
     #[test]
     fn flow_key_is_directionless() {
         let a = Endpoint {
@@ -317,5 +370,184 @@ mod tests {
         tracker.on_ack(1.05, 1100, |rtt| samples.push(rtt));
         assert_eq!(samples.len(), 1);
         assert!(samples[0] >= 50.0);
+    }
+
+    #[test]
+    fn flow_direction_tcp_state_sequence_observations_and_timestamp_gap_are_consistent() {
+        let client = [10, 0, 0, 1];
+        let server = [10, 0, 0, 2];
+        let mut tracker = FlowTracker::new(5.0, 1024, true, true, true);
+
+        observe_tcp_segment(
+            &mut tracker,
+            1.0,
+            client,
+            server,
+            40000,
+            443,
+            100,
+            0,
+            0x02,
+            &[],
+        ); // SYN
+        observe_tcp_segment(
+            &mut tracker,
+            1.1,
+            server,
+            client,
+            443,
+            40000,
+            500,
+            101,
+            0x12,
+            &[],
+        ); // SYN-ACK
+        observe_tcp_segment(
+            &mut tracker,
+            1.2,
+            client,
+            server,
+            40000,
+            443,
+            101,
+            501,
+            0x10,
+            &[],
+        ); // ACK
+
+        let mut snapshot = tracker
+            .snapshot()
+            .pop()
+            .expect("handshake creates one flow");
+        assert_eq!(snapshot.tcp_state, Some(TcpState::Established));
+        assert_eq!(snapshot.client, Some(FlowDirection::AtoB));
+        assert_eq!((snapshot.packets_a_to_b, snapshot.packets_b_to_a), (2, 1));
+
+        observe_tcp_segment(
+            &mut tracker,
+            1.3,
+            client,
+            server,
+            40000,
+            443,
+            101,
+            501,
+            0x18,
+            b"0123456789",
+        );
+        observe_tcp_segment(
+            &mut tracker,
+            1.4,
+            server,
+            client,
+            443,
+            40000,
+            501,
+            111,
+            0x10,
+            &[],
+        );
+        observe_tcp_segment(
+            &mut tracker,
+            1.5,
+            client,
+            server,
+            40000,
+            443,
+            101,
+            501,
+            0x18,
+            b"0123456789",
+        ); // retransmission
+        observe_tcp_segment(
+            &mut tracker,
+            1.6,
+            client,
+            server,
+            40000,
+            443,
+            121,
+            501,
+            0x18,
+            b"abcdefghij",
+        ); // advance
+        observe_tcp_segment(
+            &mut tracker,
+            1.7,
+            client,
+            server,
+            40000,
+            443,
+            111,
+            501,
+            0x18,
+            b"abcdefghij",
+        ); // out of order
+
+        snapshot = tracker
+            .snapshot()
+            .pop()
+            .expect("packets retain the canonical flow");
+        assert_eq!((snapshot.packets_a_to_b, snapshot.packets_b_to_a), (6, 2));
+        assert_eq!(snapshot.retransmissions, 1);
+        assert_eq!(snapshot.out_of_order, 1);
+        assert_eq!(snapshot.rtt_samples, 3);
+        assert!(
+            (snapshot
+                .rtt_last_ms
+                .expect("ACKs should produce RTT samples")
+                - 100.0)
+                .abs()
+                < 1e-6
+        );
+        assert_eq!(snapshot.tcp_state, Some(TcpState::Established));
+
+        observe_tcp_segment(
+            &mut tracker,
+            2.0,
+            client,
+            server,
+            40000,
+            443,
+            131,
+            501,
+            0x11,
+            &[],
+        ); // FIN
+        assert_eq!(tracker.snapshot()[0].tcp_state, Some(TcpState::FinWait));
+        observe_tcp_segment(
+            &mut tracker,
+            2.1,
+            server,
+            client,
+            443,
+            40000,
+            502,
+            131,
+            0x11,
+            &[],
+        ); // peer FIN
+        assert_eq!(tracker.snapshot()[0].tcp_state, Some(TcpState::Closed));
+        observe_tcp_segment(
+            &mut tracker,
+            2.2,
+            server,
+            client,
+            443,
+            40000,
+            503,
+            131,
+            0x04,
+            &[],
+        ); // RST
+        assert_eq!(tracker.snapshot()[0].tcp_state, Some(TcpState::Reset));
+        assert_eq!(tracker.snapshot()[0].first_seen, 1.0);
+        assert_eq!(tracker.snapshot()[0].last_seen, 2.2);
+
+        assert_eq!(tracker.maybe_expire(8.0), 1);
+        assert!(
+            tracker.is_empty(),
+            "timestamp gap expires the inactive flow"
+        );
     }
 }

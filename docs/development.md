@@ -59,7 +59,7 @@ netscope/
     pipeline/
       mod.rs                    # Pipeline spawn, OwnedPacket, PipelineHandle
       router.rs                 # Fast 5-tuple extraction and shard routing
-      worker.rs                 # Per-shard worker (parse, flow, anomaly, tick)
+      worker.rs                 # Per-shard worker (parse, flow, tick)
       aggregator.rs             # Merges shard ticks, forwards to CLI/web
       pool.rs                   # Shared reusable packet-buffer pool
       top_flows.rs              # Streaming heavy-hitter tracker for dashboard top flows

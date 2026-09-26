@@ -27,6 +27,7 @@ pub fn maybe_analyze_anomaly(
     ts: f64,
     packet: &protocol::ParsedPacket<'_>,
 ) -> Result<Vec<analysis::anomaly::Alert>, std::io::Error> {
+    detector.advance_time(ts);
     let (src_ip, dst_ip, skip_flow) = match &packet.network {
         Some(protocol::NetworkHeader::Ipv4(hdr)) => {
             let skip = hdr.fragment_offset() != 0;
