@@ -1,0 +1,16 @@
+[analysis.anomalies]
+enabled = true
+
+[analysis.anomalies.syn_flood]
+enabled = true
+window_secs = 5.0
+syn_threshold = 8
+unique_src_threshold = 8
+cooldown_secs = 60.0
+
+[analysis.anomalies.port_scan]
+enabled = true
+window_secs = 10.0
+unique_ports_threshold = 4
+unique_hosts_threshold = 100
+cooldown_secs = 30.0

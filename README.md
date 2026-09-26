@@ -30,7 +30,7 @@ sudo ./target/release/netscope --list-interfaces
 sudo ./target/release/netscope
 
 # Analyze an offline pcap (no sudo required)
-./target/release/netscope --read-pcap trace.pcap --quiet --stats
+./target/release/netscope --read-pcap examples/pcaps/normal.pcap --config examples/anomaly-demo.toml --quiet --summary-json /tmp/netscope-normal-summary.json
 
 # Start the web dashboard (open http://127.0.0.1:8080; use https://... if TLS is enabled)
 sudo ./target/release/netscope --web --quiet
@@ -39,7 +39,7 @@ sudo ./target/release/netscope --web --quiet
 curl http://127.0.0.1:8080/metrics
 ```
 
-Live capture requires elevated privileges (`sudo` or `CAP_NET_RAW` on Linux). Offline pcap analysis (`--read-pcap`) does not. For more workflows, including exports, anomaly detection, and pipeline mode, see [Usage Examples](docs/usage.md). For dashboard-specific behavior and tuning, see [Web Dashboard](docs/web-dashboard.md).
+Live capture requires elevated privileges (`sudo` or `CAP_NET_RAW` on Linux). Offline pcap analysis (`--read-pcap`) does not. The [synthetic PCAP investigations](examples/README.md) include reproducible normal, port-scan, SYN-flood, and parser-edge examples. For more workflows, including exports and dashboard behavior, see [Usage Examples](docs/usage.md) and [Web Dashboard](docs/web-dashboard.md).
 
 ## Documentation
 
