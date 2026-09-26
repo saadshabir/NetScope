@@ -1,6 +1,6 @@
 # NetScope streamlining plan
 
-- **Status:** Phases 0 and 1 complete. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget.
+- **Status:** Phases 0, 1, and 2 complete. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget. Phase 2 adds deterministic synthetic PCAP investigations and regression coverage.
 - **Change type:** Focused cleanup with explicit behavior changes where current behavior is misleading.
 - **Baseline inspected:** 2026-09-24, `main` at `6355f8c`.
 - **Target:** A dependable Rust packet and flow investigation tool with reproducible correctness and performance evidence.
@@ -362,9 +362,9 @@ The Phase 1.2 regression already present in the working tree covers the first fi
 
 ### 2.1 Build the fixture set
 
-- [ ] Create a deterministic, streaming PCAP generator using Python's standard library or existing Rust code. Fix the random seed, timestamps, addresses, packet ordering, and byte layout. Avoid adding a packet-crafting dependency solely for fixtures.
-- [ ] Commit generated **small** classic PCAP files, a generation command, a manifest with packet counts and SHA-256 hashes, and a short provenance statement confirming that traffic is synthetic.
-- [ ] Keep benchmark-sized traces generated on demand. Do not commit multi-gigabyte PCAPs or captures from real users.
+- [x] Create a deterministic, streaming PCAP generator using Python's standard library or existing Rust code. Fix the random seed, timestamps, addresses, packet ordering, and byte layout. Avoid adding a packet-crafting dependency solely for fixtures.
+- [x] Commit generated **small** classic PCAP files, a generation command, a manifest with packet counts and SHA-256 hashes, and a short provenance statement confirming that traffic is synthetic.
+- [x] Keep benchmark-sized traces generated on demand. Do not commit multi-gigabyte PCAPs or captures from real users.
 
 | Proposed fixture | Required contents | Expected observation |
 | --- | --- | --- |
@@ -377,22 +377,26 @@ The anomaly fixtures should use explicit demo thresholds in a checked-in config.
 
 ### 2.2 Write investigations people can follow
 
-- [ ] Put the investigations in one `examples/README.md` with short sections and direct links to the PCAPs and demo config. Avoid one Markdown file per tiny example.
-- [ ] Add a normal-traffic investigation: the question, exact command, relevant flow or packet fields, expected result, and what the result does **not** prove.
-- [ ] Add a port-scan investigation with alert JSONL output, the specific unique-port/host condition, and one benign pattern that could also trigger the heuristic.
-- [ ] Add a SYN-flood investigation showing source diversity, time window, cooldown, and the limitation of packet-only evidence.
-- [ ] Include expected result files only when they can be normalized for unstable ordering or timestamps. Keep machine assertions focused on IDs, counts, fields, and alert kinds rather than prose formatting.
-- [ ] Link the shortest example from the README so the first successful run takes one command after building.
+- [x] Put the investigations in one `examples/README.md` with short sections and direct links to the PCAPs and demo config. Avoid one Markdown file per tiny example.
+- [x] Add a normal-traffic investigation: the question, exact command, relevant flow or packet fields, expected result, and what the result does **not** prove.
+- [x] Add a port-scan investigation with alert JSONL output, the specific unique-port/host condition, and one benign pattern that could also trigger the heuristic.
+- [x] Add a SYN-flood investigation showing source diversity, time window, cooldown, and the limitation of packet-only evidence.
+- [x] Include expected result files only when they can be normalized for unstable ordering or timestamps. Keep machine assertions focused on IDs, counts, fields, and alert kinds rather than prose formatting.
+- [x] Link the shortest example from the README so the first successful run takes one command after building.
 
 ### 2.3 Turn examples into regression checks
 
-- [ ] Run representative fixtures in both modes for packet accounting and flow parity. Run anomaly fixtures in both modes because sharding can change their result. Avoid a full fixture-by-mode matrix when it repeats the same processing path without a new failure risk.
-- [ ] Assert manifest packet count, summary reconciliation, a few essential flow fields, alert kinds and counts, and zero offline dispatch drops. Avoid snapshots of full human-readable output.
-- [ ] Verify generator output hashes in CI so checked-in PCAPs and source cannot drift apart.
+- [x] Run representative fixtures in both modes for packet accounting and flow parity. Run anomaly fixtures in both modes because sharding can change their result. Avoid a full fixture-by-mode matrix when it repeats the same processing path without a new failure risk.
+- [x] Assert manifest packet count, summary reconciliation, a few essential flow fields, alert kinds and counts, and zero offline dispatch drops. Avoid snapshots of full human-readable output.
+- [x] Verify generator output hashes in CI so checked-in PCAPs and source cannot drift apart.
 
 **Deliverables:** Small tracked PCAPs, generator and manifest, three concise investigation sections in one guide, and targeted integration tests.
 
 **Exit gate:** A new contributor can run the normal and anomaly examples from a clean checkout without root and obtain the documented results.
+
+**Completion record (2026-09-26):** Added four deterministic fixtures (8, 16, 64, and 6 packets), a standard-library streaming generator, a manifest with hashes, counts, and expected parser results, fixture-specific anomaly thresholds, three investigations, and parser-boundary notes. The README now runs the normal fixture as its offline quickstart, and CI verifies the checked-in PCAP hashes against regenerated output. The Phase 2 integration tests pass in inline and two-worker pipeline modes, including directional flow parity; release smoke runs confirm the documented one-alert inline and two-alert pipeline results for both anomaly examples, with zero offline dispatch drops.
+
+`python3 scripts/generate_examples.py --check`, `cargo fmt -- --check`, `cargo clippy --locked --all-targets -- -D warnings`, `cargo build --locked --release`, `cargo test --locked --test phase2_examples`, and `git diff --check` pass. A full `cargo test --locked` attempt ran 126 library tests: 123 passed, while three existing WebSocket tests could not bind their loopback listeners in this restricted environment (`PermissionDenied`). This environment-only failure is separate from the passing Phase 2 integration tests.
 
 ## Phase 3 — Harden protocol and anomaly behavior
 
@@ -771,6 +775,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 #### Added
 
+- Four deterministic synthetic classic PCAP fixtures and a shared investigation guide covering normal traffic, the anomaly heuristics, and parser boundaries.
+- A standard-library fixture generator, a manifest with packet counts, wire bytes, hashes, and expected parser results, and a CI check to keep checked-in example traces synchronized with their source.
+- Targeted offline integration coverage for fixture accounting, inline/pipeline flow parity, decoded DNS/TLS fields, anomaly alert counts, and parser classification.
 - `--summary-json <PATH>` and `output.summary_json` for versioned final packet, flow, alert, drop, timing, and output-error accounting.
 - `--read-pcap <PATH>` and `capture.read_pcap` to analyze offline pcaps (supports BPF filters and can be paired with `--write-pcap` to rewrite pcaps).
 - Size-based rotation with bounded retention for pcap output (`--write-pcap`) via `--write-pcap-rotate-mb` / `--write-pcap-max-files` (and matching `[output]` config keys).

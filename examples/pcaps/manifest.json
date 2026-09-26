@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "provenance": "All packets are generated locally by scripts/generate_examples.py; no traffic was captured from real users or networks.",
+  "generator": "scripts/generate_examples.py",
+  "base_timestamp_utc_seconds": 1700000000,
+  "synthetic_seed": "0x4e455453434f5045",
+  "fixtures": [
+    {
+      "file": "normal.pcap",
+      "description": "TCP and partial TLS handshake, DNS query and response, and visible ClientHello SNI",
+      "packet_count": 8,
+      "wire_bytes": 618,
+      "pcap_bytes": 770,
+      "sha256": "2008c03cc5ccf77b16545c52bec1b0d632bedc6380e9f5c1cada9b9be19041e3",
+      "expected_packet_accounting": {
+        "packets_with_transport_header": 8,
+        "malformed_or_unsupported_packets": 0
+      }
+    },
+    {
+      "file": "port-scan.pcap",
+      "description": "One source sends TCP SYN probes to sixteen destination ports",
+      "packet_count": 16,
+      "wire_bytes": 864,
+      "pcap_bytes": 1144,
+      "sha256": "ff21d31c11b3036a32aa7d46364276cd1cb1ec2ba334cbe44e981f7a38de85db",
+      "expected_packet_accounting": {
+        "packets_with_transport_header": 16,
+        "malformed_or_unsupported_packets": 0
+      }
+    },
+    {
+      "file": "syn-flood.pcap",
+      "description": "Sixty-four synthetic sources send initial SYNs to one destination and port",
+      "packet_count": 64,
+      "wire_bytes": 3456,
+      "pcap_bytes": 4504,
+      "sha256": "3c08061ac8a73f73d11d7720139b425bc649e52648a34f17aa48b97a397660b4",
+      "expected_packet_accounting": {
+        "packets_with_transport_header": 64,
+        "malformed_or_unsupported_packets": 0
+      }
+    },
+    {
+      "file": "protocol-edges.pcap",
+      "description": "IPv6, QinQ, ICMP, truncated TCP, and an unsupported EtherType",
+      "packet_count": 6,
+      "wire_bytes": 338,
+      "pcap_bytes": 458,
+      "sha256": "ee687b551cc0eec384936a2b150a80160b26e8182f17bc190b45c1a04a861570",
+      "expected_packet_accounting": {
+        "packets_with_transport_header": 4,
+        "malformed_or_unsupported_packets": 2
+      }
+    }
+  ]
+}
