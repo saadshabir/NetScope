@@ -35,6 +35,14 @@ pub struct FlowTracker {
     track_rtt: bool,
     track_retrans: bool,
     track_out_of_order: bool,
+    stats: FlowTrackerStats,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FlowTrackerStats {
+    pub created: u64,
+    pub expired: u64,
+    pub evicted: u64,
 }
 
 impl FlowTracker {
@@ -71,7 +79,12 @@ impl FlowTracker {
             track_rtt,
             track_retrans,
             track_out_of_order,
+            stats: FlowTrackerStats::default(),
         }
+    }
+
+    pub fn stats(&self) -> FlowTrackerStats {
+        self.stats
     }
 
     pub fn len(&self) -> usize {
@@ -106,6 +119,7 @@ impl FlowTracker {
             )
         }
 
+        let previous_len = self.len();
         match &mut self.store {
             FlowStore::Scale {
                 time_base_ms,
@@ -145,6 +159,11 @@ impl FlowTracker {
                 }
             }
         }
+
+        self.stats.created = self
+            .stats
+            .created
+            .saturating_add(self.len().saturating_sub(previous_len) as u64);
     }
 
     #[inline]
@@ -192,6 +211,7 @@ impl FlowTracker {
             _ => return,
         };
 
+        let previous_len = self.len();
         match &mut self.store {
             FlowStore::Full(flows) => {
                 let (src_ip, dst_ip) = match ips {
@@ -259,6 +279,10 @@ impl FlowTracker {
                 }
             }
         }
+
+        if self.len() > previous_len {
+            self.stats.created = self.stats.created.saturating_add(1);
+        }
     }
 
     pub fn maybe_expire(&mut self, now: f64) -> usize {
@@ -283,7 +307,16 @@ impl FlowTracker {
         }
         self.last_prune = now;
 
+        let (stats_expired, stats_evicted) = (&mut self.stats.expired, &mut self.stats.evicted);
         let mut record_expired = |reason: ExpiredFlowReason, flow: FlowSnapshot| {
+            match reason {
+                ExpiredFlowReason::Timeout => {
+                    *stats_expired = stats_expired.saturating_add(1);
+                }
+                ExpiredFlowReason::Eviction => {
+                    *stats_evicted = stats_evicted.saturating_add(1);
+                }
+            }
             if let Some(buf) = out.as_mut() {
                 (**buf).push(ExpiredFlowEvent {
                     ts: now,

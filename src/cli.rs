@@ -89,6 +89,10 @@ pub struct Cli {
     #[arg(long)]
     pub export_csv: Option<std::path::PathBuf>,
 
+    /// Write versioned final run accounting as JSON
+    #[arg(long)]
+    pub summary_json: Option<std::path::PathBuf>,
+
     /// Enable periodic throughput stats
     #[arg(long, action = clap::ArgAction::SetTrue, conflicts_with = "no_stats")]
     pub stats: bool,

@@ -216,7 +216,8 @@ pub fn spawn(
     running: Arc<AtomicBool>,
     web_handle: Option<&web::server::WebHandle>,
 ) -> Result<PipelineHandle, std::io::Error> {
-    let num_workers = resolve_num_workers(config.num_workers);
+    let num_workers =
+        resolve_num_workers_for_flow_budget(config.num_workers, config.flow.max_flows);
 
     tracing::info!(num_workers, "starting sharded pipeline");
 
@@ -244,7 +245,8 @@ pub fn spawn(
 
         let agg_tx = agg_tx.clone();
         let running = running.clone();
-        let flow_cfg = config.flow.clone();
+        let mut flow_cfg = config.flow.clone();
+        flow_cfg.max_flows = flow_limit_for_shard(config.flow.max_flows, num_workers, shard_id);
         let analysis_cfg = config.analysis.clone();
         let web_cfg = config.web.clone();
         let heavy_hitter_top_n = config.heavy_hitter_top_n;
@@ -346,6 +348,27 @@ pub fn spawn(
     })
 }
 
+/// Divide the configured total flow budget across shards. A skewed workload can
+/// evict flows on a busy shard while another shard has unused quota; the sum
+/// of shard quotas never exceeds the configured limit.
+fn flow_limit_for_shard(total: usize, workers: usize, shard: usize) -> usize {
+    if total == 0 || workers == 0 {
+        return 0;
+    }
+    let base = total / workers;
+    let remainder = total % workers;
+    base + if shard < remainder { 1 } else { 0 }
+}
+
+fn resolve_num_workers_for_flow_budget(configured: usize, max_flows: usize) -> usize {
+    let workers = resolve_num_workers(configured);
+    if max_flows == 0 {
+        workers
+    } else {
+        workers.min(max_flows).max(1)
+    }
+}
+
 pub fn resolve_num_workers(configured: usize) -> usize {
     if configured == 0 {
         (num_cpus::get() / 2).clamp(1, 8)
@@ -356,7 +379,24 @@ pub fn resolve_num_workers(configured: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::KernelPcapStats;
+    use super::{KernelPcapStats, flow_limit_for_shard, resolve_num_workers_for_flow_budget};
+
+    #[test]
+    fn flow_budget_is_partitioned_without_exceeding_the_global_limit() {
+        let limits: Vec<_> = (0..3)
+            .map(|shard| flow_limit_for_shard(8, 3, shard))
+            .collect();
+        assert_eq!(limits, [3, 3, 2]);
+        assert_eq!(limits.iter().sum::<usize>(), 8);
+        assert_eq!(flow_limit_for_shard(0, 4, 0), 0);
+    }
+
+    #[test]
+    fn worker_count_is_reduced_when_the_flow_budget_cannot_give_each_worker_a_slot() {
+        assert_eq!(resolve_num_workers_for_flow_budget(4, 2), 2);
+        assert_eq!(resolve_num_workers_for_flow_budget(4, 1), 1);
+        assert_eq!(resolve_num_workers_for_flow_budget(4, 0), 4);
+    }
 
     #[test]
     fn kernel_stats_tracks_initialized_and_totals() {

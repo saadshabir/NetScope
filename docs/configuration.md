@@ -32,7 +32,7 @@ The CLI exposes common capture, output, and mode toggles, but some tuning knobs 
 - `web.tick_ms`, `web.top_n`, `web.packet_buffer`, `web.sample_rate`, `web.payload_bytes`, `web.tls.*`, and `web.auth.*`
 - `pipeline.channel_capacity`
 
-Use [CLI Reference](cli-reference.md) for flag-level help and this page for the full config schema.
+Use [CLI appendix](streamlining-plan.md#cli-reference) for flag-level help and this page for the full config schema.
 
 ## Path Fields
 
@@ -78,6 +78,7 @@ Note: `capture.interface` and `capture.read_pcap` are mutually exclusive. If bot
 | `write_pcap_max_files` | int  | `0`     | Keep only the newest `N` rotated pcap files (delete oldest). Must be `> 0` when rotation is enabled. |
 | `export_json`          | path | (none)  | Export flow table to JSON on exit.                                                                   |
 | `export_csv`           | path | (none)  | Export flow table to CSV on exit.                                                                    |
+| `summary_json`         | path | (none)  | Write versioned final run accounting as JSON after workers and outputs finish.                       |
 | `expired_flows_jsonl`  | path | (none)  | Write expired or evicted flows as JSON lines during capture (inline and pipeline modes).             |
 | `expired_flows_csv`    | path | (none)  | Write expired or evicted flows as streaming CSV during capture (inline and pipeline modes).          |
 | `hex_dump`             | bool | `false` | Show hex dump of each packet.                                                                        |
@@ -92,7 +93,7 @@ If either `write_pcap_rotate_mb` or `write_pcap_max_files` is set without the ot
 | Key            | Type  | Default  | Description                                                                                                                                           |
 | -------------- | ----- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `timeout_secs` | float | `60.0`   | Flow inactivity timeout in seconds. 0 = never expire.                                                                                                 |
-| `max_flows`    | int   | `100000` | Maximum tracked flows. When exceeded, oldest flows are evicted. 0 = unlimited. Used to pre-size the flow table at startup (memory reserved up front). |
+| `max_flows`    | int   | `100000` | Maximum tracked flows. In pipeline mode this is split into per-worker quotas; 0 = unlimited. Used to pre-size each flow table. |
 
 ### `[stats]`
 
@@ -190,7 +191,7 @@ For safer operations, prefer `password_file` over inline `password` so credentia
 | ------------------ | ---- | ------- | -------------------------------------------------------------------------------------------------- |
 | `enabled`          | bool | `false` | Enable the sharded pipeline for multi-core processing.                                             |
 | `workers`          | int  | `0`     | Number of worker threads. 0 = auto-detect (half of CPU count, clamped 1..8).                       |
-| `channel_capacity` | int  | `4096`  | Bounded channel size per worker shard. When full, packets are dropped (counted as dispatch drops). |
+| `channel_capacity` | int  | `4096`  | Bounded channel size per worker shard. Live capture drops and counts packets when full; offline PCAP processing waits for queue space. |
 
 For feature-specific explanations of these settings, see [Web Dashboard](web-dashboard.md), [Sharded Pipeline](pipeline.md), and the other focused guides. This page remains the source of truth for compiled defaults.
 

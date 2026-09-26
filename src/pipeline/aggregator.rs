@@ -12,7 +12,7 @@ use crate::metrics;
 use crate::sinks::OutputSinks;
 use crate::web::messages::{CaptureEvent, FlowInfo, StatsTick};
 
-use super::worker::{ShardShutdown, ShardTick, WorkerEvent};
+use super::worker::{ShardShutdown, ShardTick, WorkerEvent, WorkerRunStats};
 use super::{KernelPcapStats, PipelineStats};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -83,6 +83,10 @@ struct AggregatorState {
     alert_count: u64,
     /// Per-shard final snapshots collected on shutdown.
     shard_snapshots: Vec<Option<Vec<FlowSnapshot>>>,
+    /// Cumulative packet and flow accounting collected from workers.
+    worker_stats: WorkerRunStats,
+    /// Output errors recorded by the capture sinks.
+    output_errors: Vec<String>,
     /// Fatal error that should terminate capture.
     fatal_error: Option<String>,
 }
@@ -95,6 +99,8 @@ impl AggregatorHandle {
                 latest_tick: None,
                 alert_count: 0,
                 shard_snapshots: vec![None; num_workers],
+                worker_stats: WorkerRunStats::default(),
+                output_errors: Vec::new(),
                 fatal_error: None,
             })),
         }
@@ -111,6 +117,29 @@ impl AggregatorHandle {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .alert_count
+    }
+
+    pub fn worker_stats(&self) -> WorkerRunStats {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .worker_stats
+    }
+
+    pub fn output_errors(&self) -> Vec<String> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .output_errors
+            .clone()
+    }
+
+    fn append_output_errors(&self, errors: Vec<String>) {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .output_errors
+            .extend(errors);
     }
 
     /// Collect all final flow snapshots (call after pipeline shutdown).
@@ -280,6 +309,7 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
         }
     }
 
+    handle.append_output_errors(output_sinks.take_errors());
     tracing::debug!("aggregator shut down");
 }
 
@@ -387,6 +417,37 @@ fn record_shutdown_snapshot(state: &mut AggregatorState, shutdown: ShardShutdown
         );
     }
 
+    state.worker_stats.processed_frames = state
+        .worker_stats
+        .processed_frames
+        .saturating_add(shutdown.stats.processed_frames);
+    state.worker_stats.parsed_packets = state
+        .worker_stats
+        .parsed_packets
+        .saturating_add(shutdown.stats.parsed_packets);
+    state.worker_stats.packets_with_transport_header = state
+        .worker_stats
+        .packets_with_transport_header
+        .saturating_add(shutdown.stats.packets_with_transport_header);
+    state.worker_stats.malformed_or_unsupported_packets = state
+        .worker_stats
+        .malformed_or_unsupported_packets
+        .saturating_add(shutdown.stats.malformed_or_unsupported_packets);
+    state.worker_stats.flows.created = state
+        .worker_stats
+        .flows
+        .created
+        .saturating_add(shutdown.stats.flows.created);
+    state.worker_stats.flows.expired = state
+        .worker_stats
+        .flows
+        .expired
+        .saturating_add(shutdown.stats.flows.expired);
+    state.worker_stats.flows.evicted = state
+        .worker_stats
+        .flows
+        .evicted
+        .saturating_add(shutdown.stats.flows.evicted);
     state.shard_snapshots[shutdown.shard_id] = Some(shutdown.flows);
 }
 
@@ -500,7 +561,7 @@ mod tests {
     use super::*;
     use crate::flow::{Endpoint, FlowProtocol};
     use crate::pipeline::KernelPcapStats;
-    use crate::pipeline::worker::ShardShutdown;
+    use crate::pipeline::worker::{ShardShutdown, WorkerRunStats};
     use std::sync::atomic::AtomicBool;
 
     fn test_snapshot(seed: u16) -> FlowSnapshot {
@@ -561,11 +622,13 @@ mod tests {
         tx.send(WorkerEvent::Shutdown(ShardShutdown {
             shard_id: 0,
             flows: vec![test_snapshot(1001)],
+            stats: WorkerRunStats::default(),
         }))
         .unwrap();
         tx.send(WorkerEvent::Shutdown(ShardShutdown {
             shard_id: 1,
             flows: vec![test_snapshot(1002)],
+            stats: WorkerRunStats::default(),
         }))
         .unwrap();
         drop(tx);
@@ -605,16 +668,19 @@ mod tests {
         tx.send(WorkerEvent::Shutdown(ShardShutdown {
             shard_id: 0,
             flows: vec![test_snapshot(2001)],
+            stats: WorkerRunStats::default(),
         }))
         .unwrap();
         tx.send(WorkerEvent::Shutdown(ShardShutdown {
             shard_id: 0,
             flows: vec![test_snapshot(2002)],
+            stats: WorkerRunStats::default(),
         }))
         .unwrap();
         tx.send(WorkerEvent::Shutdown(ShardShutdown {
             shard_id: 1,
             flows: vec![test_snapshot(2003)],
+            stats: WorkerRunStats::default(),
         }))
         .unwrap();
         drop(tx);

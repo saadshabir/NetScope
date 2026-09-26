@@ -74,6 +74,12 @@ fn build_packet_summary_line(
         }
     }
 
+    if let Some(error) = &packet.transport_parse_error {
+        summary.push_str(&format!(" | malformed transport: {}", error));
+    } else if packet.unsupported {
+        summary.push_str(" | unsupported protocol payload");
+    }
+
     // Payload size
     if !packet.payload.is_empty() {
         summary.push_str(&format!(" | payload: {} bytes", packet.payload.len()));

@@ -197,6 +197,12 @@ pub struct ParsedPacket<'a> {
     pub vlan_stack: Option<VlanStack>,
     pub network: Option<NetworkHeader<'a>>,
     pub transport: Option<TransportHeader<'a>>,
+    /// A malformed recognized transport header, retained alongside the valid
+    /// link/network headers so callers can report partial decoding accurately.
+    pub transport_parse_error: Option<ParseError>,
+    /// The frame carried an EtherType or IP protocol this parser does not
+    /// support. A recognized link/network header may still be available.
+    pub unsupported: bool,
     pub payload: &'a [u8],
 }
 
@@ -421,14 +427,33 @@ pub fn parse_packet_with_linktype(
         remaining = &remaining[4..];
     }
 
+    let unsupported_link_payload = ether_type
+        .is_some_and(|value| !matches!(value, EtherType::Ipv4 | EtherType::Ipv6 | EtherType::Arp));
     let (network, l4_data, ip_proto) = if let Some(link_ether_type) = ether_type {
         parse_network_from_ether_type(link_ether_type, remaining)?
     } else {
         parse_network_from_ip_payload(remaining)?
     };
 
+    let non_initial_fragment = match &network {
+        Some(NetworkHeader::Ipv4(header)) => header.fragment_offset() != 0,
+        Some(NetworkHeader::Ipv6(header)) => header.is_non_initial_fragment(),
+        Some(NetworkHeader::Arp(_)) | None => false,
+    };
+    let unsupported_network_payload = ether_type.is_none() && network.is_none();
+
     // Layer 4: Transport
-    let (transport, payload) = parse_transport(ip_proto, l4_data);
+    let (transport, payload, transport_parse_error) = if non_initial_fragment {
+        // Later fragments do not contain the transport header. Keep their
+        // network decode and payload, but do not report a malformed L4 header.
+        (None, l4_data, None)
+    } else {
+        parse_transport(ip_proto, l4_data)
+    };
+    let unsupported_ip_protocol = matches!(
+        ip_proto,
+        Some(IpProtocol::Unknown(_) | IpProtocol::Fragment)
+    );
 
     let vlan = vlan_stack
         .as_ref()
@@ -440,6 +465,11 @@ pub fn parse_packet_with_linktype(
         vlan_stack,
         network,
         transport,
+        transport_parse_error,
+        unsupported: unsupported_link_payload
+            || unsupported_network_payload
+            || unsupported_ip_protocol
+            || non_initial_fragment,
         payload,
     })
 }
@@ -508,37 +538,37 @@ fn parse_network_from_ip_payload<'a>(remaining: &'a [u8]) -> NetworkParseResult<
 fn parse_transport<'a>(
     ip_proto: Option<IpProtocol>,
     l4_data: &'a [u8],
-) -> (Option<TransportHeader<'a>>, &'a [u8]) {
+) -> (Option<TransportHeader<'a>>, &'a [u8], Option<ParseError>) {
     match ip_proto {
         Some(IpProtocol::Tcp) => match tcp::TcpHeader::parse(l4_data) {
             Ok(hdr) => {
                 let payload = hdr.payload();
-                (Some(TransportHeader::Tcp(hdr)), payload)
+                (Some(TransportHeader::Tcp(hdr)), payload, None)
             }
-            Err(_) => (None, l4_data),
+            Err(err) => (None, l4_data, Some(err)),
         },
         Some(IpProtocol::Udp) => match udp::UdpHeader::parse(l4_data) {
             Ok(hdr) => {
                 let payload = hdr.payload();
-                (Some(TransportHeader::Udp(hdr)), payload)
+                (Some(TransportHeader::Udp(hdr)), payload, None)
             }
-            Err(_) => (None, l4_data),
+            Err(err) => (None, l4_data, Some(err)),
         },
         Some(IpProtocol::Icmp) => match icmp::IcmpHeader::parse(l4_data) {
             Ok(hdr) => {
                 let payload = hdr.payload();
-                (Some(TransportHeader::Icmp(hdr)), payload)
+                (Some(TransportHeader::Icmp(hdr)), payload, None)
             }
-            Err(_) => (None, l4_data),
+            Err(err) => (None, l4_data, Some(err)),
         },
         Some(IpProtocol::Icmpv6) => match icmpv6::Icmpv6Header::parse(l4_data) {
             Ok(hdr) => {
                 let payload = hdr.payload();
-                (Some(TransportHeader::Icmpv6(hdr)), payload)
+                (Some(TransportHeader::Icmpv6(hdr)), payload, None)
             }
-            Err(_) => (None, l4_data),
+            Err(err) => (None, l4_data, Some(err)),
         },
-        _ => (None, l4_data),
+        _ => (None, l4_data, None),
     }
 }
 
@@ -615,6 +645,18 @@ mod tests {
         pkt
     }
 
+    fn make_ipv4_with_payload(protocol: u8, payload: &[u8]) -> Vec<u8> {
+        let total_len = 20 + payload.len();
+        let mut pkt = vec![0u8; 20];
+        pkt[0] = 0x45;
+        pkt[2..4].copy_from_slice(&(total_len as u16).to_be_bytes());
+        pkt[9] = protocol;
+        pkt[12..16].copy_from_slice(&[192, 0, 2, 10]);
+        pkt[16..20].copy_from_slice(&[192, 0, 2, 20]);
+        pkt.extend_from_slice(payload);
+        pkt
+    }
+
     fn make_icmpv6_ipv6_payload(
         src_ip: [u8; 16],
         dst_ip: [u8; 16],
@@ -646,6 +688,57 @@ mod tests {
         assert!(matches!(parsed.link, LinkHeader::RawIp));
         assert!(matches!(parsed.network, Some(NetworkHeader::Ipv4(_))));
         assert!(matches!(parsed.transport, Some(TransportHeader::Tcp(_))));
+        assert!(parsed.transport_parse_error.is_none());
+        assert!(!parsed.unsupported);
+    }
+
+    #[test]
+    fn malformed_tcp_and_udp_keep_partial_network_decode_and_are_classified() {
+        let truncated_tcp = make_ipv4_with_payload(6, &[0x30, 0x39, 0x00, 0x50]);
+        let tcp = parse_packet_with_linktype(&truncated_tcp, LinkType::RawIp).unwrap();
+        assert!(matches!(tcp.network, Some(NetworkHeader::Ipv4(_))));
+        assert!(tcp.transport.is_none());
+        assert!(tcp.transport_parse_error.is_some());
+        assert!(!tcp.unsupported);
+
+        let truncated_udp = make_ipv4_with_payload(17, &[0x30, 0x39, 0x00, 0x35]);
+        let udp = parse_packet_with_linktype(&truncated_udp, LinkType::RawIp).unwrap();
+        assert!(matches!(udp.network, Some(NetworkHeader::Ipv4(_))));
+        assert!(udp.transport.is_none());
+        assert!(udp.transport_parse_error.is_some());
+        assert!(!udp.unsupported);
+    }
+
+    #[test]
+    fn non_initial_ipv4_fragment_is_unsupported_without_malformed_transport() {
+        let mut fragment = make_ipv4_with_payload(6, &[0x30, 0x39, 0x00, 0x50]);
+        fragment[6..8].copy_from_slice(&1u16.to_be_bytes());
+
+        let parsed = parse_packet_with_linktype(&fragment, LinkType::RawIp).unwrap();
+
+        assert!(matches!(parsed.network, Some(NetworkHeader::Ipv4(_))));
+        assert!(parsed.transport.is_none());
+        assert!(parsed.transport_parse_error.is_none());
+        assert!(parsed.unsupported);
+    }
+
+    #[test]
+    fn raw_ip_with_unrecognized_version_is_unsupported() {
+        let parsed = parse_packet_with_linktype(&[0x70, 0, 0, 0], LinkType::RawIp).unwrap();
+
+        assert!(parsed.network.is_none());
+        assert!(parsed.transport_parse_error.is_none());
+        assert!(parsed.unsupported);
+    }
+
+    #[test]
+    fn truncated_vlan_is_a_parse_error() {
+        let frame = [
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x81, 0x00,
+            0x00, 0x2a,
+        ];
+        let err = parse_packet_with_linktype(&frame, LinkType::Ethernet).unwrap_err();
+        assert!(matches!(err, ParseError::TooShort { .. }));
     }
 
     #[test]

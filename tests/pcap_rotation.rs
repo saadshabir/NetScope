@@ -96,6 +96,69 @@ fn make_large_ethernet_packet(payload_len: usize) -> Vec<u8> {
     packet
 }
 
+fn make_tcp_ethernet_packet(payload_len: usize) -> Vec<u8> {
+    let ip_total_len = 20 + 20 + payload_len;
+    let ip_total_len = u16::try_from(ip_total_len).expect("payload too large for IPv4 packet");
+    let mut packet = vec![
+        0xff,
+        0xff,
+        0xff,
+        0xff,
+        0xff,
+        0xff, // dst MAC
+        0x00,
+        0x11,
+        0x22,
+        0x33,
+        0x44,
+        0x55, // src MAC
+        0x08,
+        0x00, // IPv4
+        0x45,
+        0x00, // version/IHL, DSCP/ECN
+        (ip_total_len >> 8) as u8,
+        (ip_total_len & 0xff) as u8,
+        0x00,
+        0x01, // identification
+        0x00,
+        0x00, // flags/fragment offset
+        64,
+        6, // TTL, TCP
+        0x00,
+        0x00, // checksum
+        10,
+        0,
+        0,
+        1, // src IP
+        10,
+        0,
+        0,
+        2, // dst IP
+        0x30,
+        0x39, // src port 12345
+        0x00,
+        0x50, // dst port 80
+        0x00,
+        0x00,
+        0x00,
+        0x01, // sequence number
+        0x00,
+        0x00,
+        0x00,
+        0x00, // acknowledgement number
+        0x50,
+        0x10, // data offset, ACK
+        0x20,
+        0x00, // window
+        0x00,
+        0x00, // checksum
+        0x00,
+        0x00, // urgent pointer
+    ];
+    packet.extend(std::iter::repeat_n(0x42, payload_len));
+    packet
+}
+
 fn run_netscope(args: &[&str]) -> std::process::Output {
     let bin = env!("CARGO_BIN_EXE_netscope");
     Command::new(bin)
@@ -199,6 +262,152 @@ fn run_rotation_retention_test(pipeline: bool) {
             err
         );
     }
+}
+
+#[test]
+fn offline_pipeline_backpressures_and_processes_every_frame() {
+    let dir = unique_temp_dir("offline-pipeline-backpressure");
+    let input = dir.join("input.pcap");
+    let config = dir.join("pipeline.toml");
+    let output = dir.join("rewritten.pcap");
+    let flows = dir.join("flows.json");
+    let summary = dir.join("summary.json");
+    let inline_output = dir.join("inline-rewritten.pcap");
+    let inline_flows = dir.join("inline-flows.json");
+    let inline_summary = dir.join("inline-summary.json");
+    let packet_count = 10_000;
+    let packet = make_tcp_ethernet_packet(128);
+
+    write_test_pcap(&input, 1, &packet, packet_count);
+    std::fs::write(
+        &config,
+        "[pipeline]\nchannel_capacity = 1\n\n[flow]\ntimeout_secs = 0.0\n",
+    )
+    .expect("pipeline config should be written");
+
+    let input_str = input.to_str().expect("input path must be valid UTF-8");
+    let config_str = config.to_str().expect("config path must be valid UTF-8");
+    let output_str = output.to_str().expect("output path must be valid UTF-8");
+    let flows_str = flows.to_str().expect("flow path must be valid UTF-8");
+    let inline_output_str = inline_output
+        .to_str()
+        .expect("inline output path must be valid UTF-8");
+    let inline_flows_str = inline_flows
+        .to_str()
+        .expect("inline flow path must be valid UTF-8");
+    let inline_summary_str = inline_summary
+        .to_str()
+        .expect("inline summary path must be valid UTF-8");
+    let run = run_netscope(&[
+        "--read-pcap",
+        input_str,
+        "--config",
+        config_str,
+        "--pipeline",
+        "--workers",
+        "1",
+        "--write-pcap",
+        output_str,
+        "--export-json",
+        flows_str,
+        "--summary-json",
+        summary.to_str().expect("summary path must be valid UTF-8"),
+        "--quiet",
+    ]);
+
+    assert!(
+        run.status.success(),
+        "expected success, got stderr: {}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        stdout.contains(&format!("Packets captured:  {}", packet_count)),
+        "stdout was: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("Dispatch drops:    0"),
+        "stdout was: {}",
+        stdout
+    );
+
+    let summary_json: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&summary).expect("summary JSON should exist after pipeline shutdown"),
+    )
+    .expect("summary JSON should parse");
+    assert_eq!(summary_json["frames_read"], packet_count);
+    assert_eq!(summary_json["dispatched_frames"], packet_count);
+    assert_eq!(summary_json["dispatch_drops"], 0);
+    assert_eq!(summary_json["worker_processed_frames"], packet_count);
+    assert_eq!(summary_json["worker_failures"], 0);
+    assert_eq!(summary_json["flows_created"], 1);
+
+    let expected_pcap_bytes = 24 + packet_count as u64 * (16 + packet.len() as u64);
+    assert_eq!(
+        std::fs::metadata(&output)
+            .expect("rewritten pcap should exist")
+            .len(),
+        expected_pcap_bytes,
+        "rewritten pcap should preserve every input frame"
+    );
+    let flows_json: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&flows).expect("flow export should exist after pipeline shutdown"),
+    )
+    .expect("flow export should be valid JSON");
+    assert_eq!(flows_json.as_array().expect("flow export array").len(), 1);
+    assert_eq!(flows_json[0]["packets_total"], packet_count);
+
+    let inline_run = run_netscope(&[
+        "--read-pcap",
+        input_str,
+        "--config",
+        config_str,
+        "--write-pcap",
+        inline_output_str,
+        "--export-json",
+        inline_flows_str,
+        "--summary-json",
+        inline_summary_str,
+        "--quiet",
+    ]);
+    assert!(
+        inline_run.status.success(),
+        "inline run should succeed, got stderr: {}",
+        String::from_utf8_lossy(&inline_run.stderr)
+    );
+    let inline_summary_json: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&inline_summary).expect("inline summary should exist"),
+    )
+    .expect("inline summary should be valid JSON");
+    for field in [
+        "frames_read",
+        "input_wire_bytes",
+        "packets_parsed",
+        "packets_with_transport_header",
+        "malformed_or_unsupported_packets",
+        "flows_created",
+        "flows_expired",
+        "flows_evicted",
+        "alerts_emitted",
+    ] {
+        assert_eq!(
+            inline_summary_json[field], summary_json[field],
+            "inline and pipeline summaries should agree for {field}"
+        );
+    }
+    let inline_flows_json: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(&inline_flows).expect("inline flow export should exist"),
+    )
+    .expect("inline flow export should be valid JSON");
+    assert_eq!(inline_flows_json, flows_json);
+    assert_eq!(
+        std::fs::read(&inline_output).expect("inline pcap should exist"),
+        std::fs::read(&output).expect("pipeline pcap should exist"),
+        "inline and pipeline capture outputs should preserve identical input frames"
+    );
+
+    std::fs::remove_dir_all(&dir).expect("temporary test directory should be removed");
 }
 
 fn run_rotation_retention_restart_test(pipeline: bool) {

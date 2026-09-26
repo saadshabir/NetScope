@@ -126,6 +126,8 @@ pub struct OutputConfig {
     #[serde(deserialize_with = "empty_path_none")]
     pub export_csv: Option<PathBuf>,
     #[serde(deserialize_with = "empty_path_none")]
+    pub summary_json: Option<PathBuf>,
+    #[serde(deserialize_with = "empty_path_none")]
     pub expired_flows_jsonl: Option<PathBuf>,
     #[serde(deserialize_with = "empty_path_none")]
     pub expired_flows_csv: Option<PathBuf>,

@@ -115,7 +115,7 @@ For dashboard endpoints, live update behavior, and tuning guidance, see [Web Das
 ## Next Steps
 
 - [Usage Examples](usage.md) -- Common recipes and workflows.
-- [CLI Reference](cli-reference.md) -- Full list of flags and options.
+- [CLI appendix](streamlining-plan.md#cli-reference) -- Full list of flags and options.
 - [Configuration](configuration.md) -- TOML config file for persistent settings.
 - [Web Dashboard](web-dashboard.md) -- Endpoints, live update behavior, and tuning.
 - [Troubleshooting](troubleshooting.md) -- Common setup and runtime issues.

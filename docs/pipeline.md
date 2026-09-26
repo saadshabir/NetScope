@@ -54,7 +54,7 @@ Shard routing uses canonical endpoint ordering (always hashing `(min, max)` rega
 | Key                | Default    | Description                                                                                                     |
 | ------------------ | ---------- | --------------------------------------------------------------------------------------------------------------- |
 | `workers`          | `0` (auto) | Number of worker shards. Auto mode uses half of CPU count, clamped to 1..8.                                     |
-| `channel_capacity` | `4096`     | Per-shard bounded channel size. When a channel is full, the packet is dropped and counted as a "dispatch drop". |
+| `channel_capacity` | `4096`     | Per-shard bounded channel size. Live capture drops and counts a packet if its shard queue is full. Offline PCAP processing waits for queue space so file input is not dropped. |
 
 Set in the `[pipeline]` section of the config file, or via `--pipeline` / `--workers` CLI flags.
 
@@ -62,7 +62,7 @@ For authoritative defaults and the full TOML schema, see [Configuration](configu
 
 ## Dispatch Drops
 
-When a worker's channel is full, the capture thread drops the packet rather than blocking. This prevents the capture thread from stalling (which would cause kernel-level drops). Dispatch drops are counted and surfaced in both periodic stats ticks and the final summary. Periodic stats also include live kernel/libpcap drop deltas and totals:
+During live capture, the capture thread does not wait for a worker queue. It drops and counts a packet if its shard queue is full, avoiding extra delay before libpcap or the kernel. Offline PCAP processing waits for queue space because the file can be read at the workers' pace. A worker disconnect during offline processing stops the run with an error. Dispatch drops are counted and surfaced in periodic stats ticks and the final summary. Periodic stats also include live kernel/libpcap drop deltas and totals:
 
 ```
 [stats] 942.13 Mbps | 100012 pps | 81234 flows | drops=0 (total=0) | kdrop=0 (total=120) ifdrop=0 (total=0)
@@ -74,7 +74,9 @@ Capture complete (pipeline mode).
   Dispatch drops:    42
 ```
 
-If you see significant dispatch drops, consider:
+`--write-pcap` copies each frame as the capture thread reads it, before worker dispatch. Therefore, live output PCAPs include frames that may later be counted as dispatch drops. Offline output PCAPs preserve all frames read from the input.
+
+If you see significant live dispatch drops, consider:
 
 - Increasing `channel_capacity` (at the cost of more memory).
 - Increasing `workers` to spread the load.
@@ -108,15 +110,15 @@ Each worker shard has its own `AnomalyDetector` instance. Since traffic for diff
 
 - A distributed SYN flood spread across all shards may not trigger alerts if each shard sees fewer SYNs than the threshold individually.
 - Port scans that hit many destinations will distribute across shards, reducing per-shard counts.
-- Attacks targeting a single destination (which routes to one shard) are detected normally.
+- Even traffic targeting one destination can spread across shards because routing hashes the full flow tuple, including the source endpoint.
 
-In practice, this means pipeline mode is less sensitive to anomalies than inline mode when traffic is widely distributed. If precise anomaly detection is critical, consider using inline mode or lowering thresholds proportionally.
+Pipeline mode can miss an alert that inline mode would emit for the same packets. Use inline mode when these alert decisions matter; reducing thresholds by worker count does not make the modes equivalent.
 
-### `max_flows` is per-shard
+### Flow budget
 
-The configured `max_flows` limit applies to each worker independently. With 4 workers and `max_flows = 100000`, the effective global limit is 400,000 flows. This means pipeline mode can use more memory for flow tracking than the configured value suggests.
+In pipeline mode, `flow.max_flows` is a total budget divided across worker shards. Any remainder is assigned to the first shards. When the budget is smaller than the requested worker count, NetScope reduces the actual worker count so each active shard receives a positive quota. The final summary reports the actual worker count.
 
-NetScope also pre-sizes each shard's flow table based on `max_flows`, so a higher value can increase memory reserved at startup even before the flow table fills. If `analysis.rtt`, `analysis.retrans`, and `analysis.out_of_order` are all disabled, each shard uses the lighter scale-mode flow store to reduce per-flow memory overhead.
+A busy shard can evict flows while another shard has unused quota. Eviction checks run at most once per second, so a burst can temporarily exceed a shard's quota until the next check. Each shard's table is pre-sized from its share of the budget. If `analysis.rtt`, `analysis.retrans`, and `analysis.out_of_order` are all disabled, each shard uses the lighter scale-mode flow store.
 
 ### No per-packet CLI output
 

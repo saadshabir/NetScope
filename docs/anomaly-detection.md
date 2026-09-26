@@ -82,16 +82,16 @@ Alerts appear in the "Alerts" tab of the web dashboard with timestamp, kind, and
 
 After an alert fires for a specific target (SYN flood) or source (port scan), subsequent alerts for the same key are suppressed for `cooldown_secs`. This prevents alert floods during sustained attacks.
 
-Cooldown timers and sliding-window state are periodically cleaned up (every 30 seconds) to prevent unbounded memory growth during long captures.
+Cooldown timers are cleaned up every 30 seconds. An inactive key's event queue can retain expired entries until that key receives another packet; this state limit is scheduled for correction in Phase 3.2.
 
 ## Pipeline Mode Caveat
 
 In [pipeline mode](pipeline.md), each worker shard has its own anomaly detector. Thresholds are evaluated per-shard, not globally. This means:
 
 - Distributed attacks that spread across shards may not trigger alerts if no single shard sees enough traffic to exceed the threshold.
-- Attacks targeting a single destination (which routes to one shard) are detected normally.
+- Traffic targeting one destination can still spread across shards because the router hashes the full flow tuple, including the source endpoint.
 
-If precise anomaly detection is important, consider inline mode or reducing thresholds proportionally to the number of workers.
+Pipeline mode can miss an alert that inline mode would emit for the same packets. Use inline mode when these alert decisions matter; reducing thresholds by worker count does not make the modes equivalent.
 
 ## Configuration Summary
 
