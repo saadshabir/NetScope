@@ -106,6 +106,41 @@ python3 scripts/perf/repeat_scenarios.py \
 
 The benchmark scripts are separate from the live-capture/drop validation. A PCAP run cannot measure kernel or interface loss.
 
+## Live capture and packet loss
+
+Use the isolated Linux procedure in [`scripts/perf/live_capture.py`](../scripts/perf/live_capture.py). It creates one deterministic, finite `steady-flow` trace, sets up capture on the receiver end of a named `veth` pair, and runs each offered rate three times. The sender transmits only after NetScope emits `NETSCOPE_READY`; the event includes the selected interface, BPF filter, snaplen, requested capture buffer, promiscuous/immediate modes, worker count, and per-worker queue capacity.
+
+Create the isolated pair. The runner builds the release binary with `cargo build --locked --release` and saves the exact source inputs and build output before measuring:
+
+```bash
+sudo -v
+sudo scripts/perf/live-veth.sh up
+```
+
+Run the default matrix (at least five seconds of offered traffic per rate, five rates, three repetitions; one million packets is the per-run minimum):
+
+```bash
+python3 scripts/perf/live_capture.py \
+  --output-dir "tmp/perf/live-capture/$(date +%Y%m%d-%H%M%S)"
+```
+
+The default run retains the generated trace and every captured PCAP, about 3.2 GB of packet data before logs and JSON. Lower the rate list or `--duration-seconds` when less storage is available; each setting change belongs in the saved run record.
+
+The runner requires Linux, `iproute2`, `tcpreplay`, GNU `/usr/bin/time`, Rust/Cargo, and a cached `sudo` authorization. It verifies the veth kind, UP state, reciprocal peer indexes, names, and fixed MAC addresses before running. The BPF filter is fixed to the generated trace; a preflight scan rejects a trace if any packet fails to match. Each trial has a finite `tcpreplay --limit`, scales its replay timeout to the requested rate, and gives NetScope up to 15 seconds to finish capture and worker shutdown after replay; process groups receive SIGINT and escalate to TERM/KILL if needed. A rate trial contributes to the bracket only when `tcpreplay` exits successfully, reports the full requested packet count, and achieves at least 99.5% of the requested rate. The report labels the bracket by requested rate and lists each achieved rate, so it does not claim an exact achieved rate. Larger rate shortfalls or incomplete replays remain inconclusive for sender/capture reconciliation unless separate drop counters or captured-versus-processed accounting prove a drop. The readiness event confirms the buffer size requested from libpcap; the OS does not provide a portable readback of the actual allocated capture buffer. The veth pair adds no IP addresses or routes. When finished, remove only this named pair:
+
+```bash
+sudo scripts/perf/live-veth.sh status
+sudo scripts/perf/live-veth.sh down
+```
+
+Each suite saves `source.json`, a reconstructible `source-snapshot/` (including dirty tracked and untracked files), and release-build logs alongside the trace and results. The runner rejects a source change during the build and marks the suite invalid if the source or binary changes during measurement. Each run retains full NetScope and tcpreplay output, exact commands and config, the versioned NetScope summary, GNU time CPU/RSS output, veth counters before and after, and a captured PCAP. The runner compares the captured TCP sequence identifiers with the generated trace, then creates `suite.json` and `report.md`. PCAP writing is enabled for that reconciliation, so its disk I/O is part of the measured configuration. The report keeps `tcpreplay` send-path counts, NetScope frames read and worker-processed frames, libpcap kernel/interface drops, veth RX/TX drops, dispatch drops, wall time, CPU, and RSS as separate fields. Missing counters are unknown, not zero.
+
+The tested requested rates form a bracket, not an exact maximum. The report names the highest qualified target with zero observed loss in every repetition and the first qualified target where any repetition showed loss. A loss observation from an under-rate or incomplete replay remains in the raw record but does not set a target-rate bracket endpoint. If no qualified loss appears, the report says no onset was established. Incomplete matrix coverage is shown separately. To narrow an observed bracket, rerun with additional rates between its endpoints and retain the same trace, host, settings, and repetition count. Review raw records as well as the generated summary.
+
+The veth runner is Linux-only. macOS does not provide an equivalent isolated sender/receiver pair through `lo0`; do not use loopback replay to make a loss claim. A manual macOS trial is appropriate only with a second host connected over a dedicated, otherwise unused point-to-point link. Start NetScope on the receiver and wait for `NETSCOPE_READY` before starting finite `tcpreplay` on the sender. Save both command outputs, the NetScope summary, interface-counter readings, and the trace hash. Report unavailable drop counters as unavailable; the Linux runner's automated rate bracketing does not apply to that manual setup.
+
+The implementation host for this phase is macOS 27.0 and has no Linux `ip` utility or Docker/Podman runtime. Therefore the checked-in [live-capture report](benchmarks/live-capture/report.md) records the measurement as pending; it contains no claimed live rate or loss number. A Linux run is required to publish those results.
+
 ## Tuning
 
 ### Reducing kernel drops

@@ -9,6 +9,7 @@ use netscope::{build_packet_data, maybe_analyze_anomaly, sinks};
 use clap::Parser;
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -505,6 +506,33 @@ fn print_capture_intro(
         }
     }
     Ok(())
+}
+
+/// Emit a machine-readable live-capture readiness marker after capture and
+/// processing resources are ready. Live harnesses must wait for this event
+/// before sending traffic so startup packets cannot be counted as loss.
+fn emit_capture_ready(config: &RuntimeConfig, worker_count: Option<usize>) {
+    if config.capture.read_pcap.is_some() {
+        return;
+    }
+
+    let readiness = serde_json::json!({
+        "event": "netscope.capture.ready",
+        "schema_version": 1,
+        "interface": config.capture.interface.as_deref().unwrap_or("(default)"),
+        "filter": config.capture.filter.as_deref(),
+        "snaplen": config.capture.snaplen,
+        "timeout_ms": config.capture.timeout_ms,
+        "capture_buffer_size_mb_requested": config.capture.buffer_size_mb,
+        "promiscuous": config.capture.promiscuous,
+        "immediate_mode": config.capture.immediate_mode,
+        "pipeline_enabled": config.pipeline.enabled,
+        "workers": worker_count,
+        "requested_workers": config.pipeline.workers,
+        "channel_capacity": config.pipeline.enabled.then_some(config.pipeline.channel_capacity),
+    });
+    println!("NETSCOPE_READY {readiness}");
+    let _ = std::io::stdout().flush();
 }
 
 const SAVEFILE_FLUSH_INTERVAL_PACKETS: u64 = 1024;
@@ -1011,6 +1039,8 @@ fn run_capture_inline(
     let mut web_tick_packets: u64 = 0;
     let mut web_frame_seq: u64 = 0;
 
+    emit_capture_ready(config, None);
+
     let capture_result = (|| -> Result<(), Box<dyn std::error::Error>> {
         while running.load(Ordering::SeqCst) {
             // Check packet count limit
@@ -1446,6 +1476,7 @@ fn run_capture_pipeline(
     };
     println!("Pipeline: {} worker shards", num_workers);
     println!();
+    emit_capture_ready(config, Some(num_workers));
 
     let mut packet_count: u64 = 0;
     let mut stats_last = Instant::now();

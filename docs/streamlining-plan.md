@@ -108,7 +108,7 @@ Delete a superseded path together with its code, tests, docs, config, and CI ref
 | --- | --- | --- |
 | Documentation catalogue | Merge and delete 11 superseded guides listed in Phase 7. | Five concise reader-facing pages and one investigation guide. |
 | Unverifiable performance numbers | Remove the approximate results table from `docs/performance.md`. | Publish measured results with raw runs, host, commit, and PCAP hash. |
-| Old perf scripts | Retire `scripts/perf/validate.sh`, `validate-throughput.sh`, `validate-web.sh`, and their two TOML profiles when the new runner and live runbook cover their jobs. | One offline runner plus one controlled live procedure; no replay-before-capture path. |
+| Old perf scripts | Retire `scripts/perf/validate.sh`, `validate-web.sh`, and their TOML profiles when the new runners and runbooks cover their jobs. `validate-throughput.sh` was removed in Phase 5. | One offline runner plus one controlled live procedure; no replay-before-capture loss measurement. |
 | Public synthetic-flow memory mode | Remove `--synthetic-flows` from the ordinary CLI and remove `src/memory.rs` if its only remaining use disappears. | Run scale-memory measurement from the developer benchmark harness. |
 | Ignore-rule clutter | Remove literal Markdown fences, duplicate patterns, and broad patterns with no project use from `.gitignore`. | Explicit rules for `target/`, local caches, generated traces, and benchmark output. |
 | Local generated output | Clean old ignored `target/` artifacts after a fresh build works. | Source, tracked fixtures, and user data remain untouched. |
@@ -503,13 +503,18 @@ Live capture is a separate experiment because NIC, driver, kernel buffers, sched
 
 ### Steps
 
-- [ ] Prefer an isolated Linux `veth` sender/receiver pair with a dedicated BPF filter and a finite replay. Document setup and teardown commands. Provide a macOS manual procedure only where equivalent isolation is practical.
-- [ ] Start NetScope before replay. Wait for an explicit readiness signal rather than sleeping a fixed second. Confirm the selected interface, filter, snaplen, queue capacity, worker count, and capture buffer.
-- [ ] Replay a known finite number of packets at several offered rates; use a timeout and signal-safe cleanup so a run cannot hang when packets are lost.
-- [ ] Record replay tool packet count, NetScope frames read and processed, kernel/libpcap drops, interface drops, dispatch drops, wall time, CPU, RSS, and full command output.
-- [ ] Repeat each rate. Identify the highest tested sustained rate with zero observed loss and the first tested rate that shows loss. Show the interval between them rather than inventing an exact maximum.
-- [ ] State when replay counts and capture counts have different meanings on the selected OS or interface. Use input packet identifiers or a controlled finite trace where practical to resolve ambiguous counts.
-- [ ] Replace the current replay-before-capture scripts or keep them only as explicitly labeled manual smoke checks. The new procedure must never claim a clean loss result from a run that missed startup traffic.
+- [x] Prefer an isolated Linux `veth` sender/receiver pair with a dedicated BPF filter and a finite replay. Document setup and teardown commands. Provide a macOS manual procedure only where equivalent isolation is practical.
+- [x] Start NetScope before replay. Wait for an explicit readiness signal rather than sleeping a fixed second. Confirm the selected interface, filter, snaplen, queue capacity, worker count, and capture buffer.
+- [x] Implement finite replay across several offered rates, with timeouts and signal-safe cleanup so a run cannot hang when packets are lost.
+- [x] Record replay tool packet count, NetScope frames read and processed, kernel/libpcap drops, interface drops, dispatch drops, wall time, CPU, RSS, and full command output.
+- [x] Implement repeated trials and report the highest requested rate with zero observed loss and the first requested rate that shows loss. Show the interval between them rather than inventing an exact maximum.
+- [ ] Run the repeated Linux rate matrix and publish the observed zero-loss/loss bracket from its raw results.
+- [x] State when replay counts and capture counts have different meanings on the selected OS or interface. Use input packet identifiers or a controlled finite trace where practical to resolve ambiguous counts.
+- [x] Replace the current replay-before-capture scripts or keep them only as explicitly labeled manual smoke checks. The new procedure must never claim a clean loss result from a run that missed startup traffic.
+
+**Implementation status (2026-09-27): COMPLETE.** Added `scripts/perf/live-veth.sh` and `scripts/perf/live_capture.py`, plus the readiness event consumed by the runner. The runner generates a finite checksummed trace with unique TCP sequence identifiers, verifies every input packet against its fixed BPF filter, builds from a saved source snapshot, waits for NetScope's effective settings, repeats configured offered rates, bounds process waits, saves full run records, and produces a qualified report. The old throughput script was removed; `validate-web.sh` is now explicitly a manual dashboard smoke check and waits for the same readiness event before replay. See the [runbook and measurement limits](performance.md#live-capture-and-packet-loss) and the [current report](benchmarks/live-capture/report.md).
+
+**Measurement status: PENDING.** The implementation host is macOS 27.0 without Linux `veth` support, so no live rate matrix or raw live runs were collected. The report records this limitation; the measured-rate step and exit gate remain open until the runner completes on Linux.
 
 **Deliverables:** Repeatable setup script or runbook, raw live run records, and one clearly qualified loss/throughput report.
 

@@ -112,8 +112,7 @@ cargo test
 
 For local performance/memory sanity checks, use `scripts/perf/validate.sh` (release build + a representative hot-path benchmark + synthetic-flow memory validation). These checks are intentionally separate from the unit/integration test suite.
 
-Replay-based perf checks (`scripts/perf/validate-throughput.sh`, `scripts/perf/validate-web.sh`) require `tcpreplay`.
-On macOS: `brew install tcpreplay`. On Debian/Ubuntu: `sudo apt-get install tcpreplay`.
+The isolated live-capture runner in `scripts/perf/live_capture.py` requires Linux, `iproute2`, `tcpreplay`, GNU `time`, Rust/Cargo, and libpcap capture privileges. It builds and records its release binary. `scripts/perf/validate-web.sh` remains a manual dashboard smoke check; it waits for NetScope readiness and does not report packet loss.
 
 Tests are co-located with the source code in `#[cfg(test)]` modules. Key test areas:
 
