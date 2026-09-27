@@ -192,8 +192,4 @@ pub struct Cli {
     /// Number of worker threads for the pipeline (0 = auto, default: 0)
     #[arg(long, default_value_t = 0)]
     pub workers: usize,
-
-    /// Run a synthetic scale-mode flow memory benchmark and exit
-    #[arg(long)]
-    pub synthetic_flows: Option<usize>,
 }

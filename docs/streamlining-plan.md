@@ -1,6 +1,6 @@
 # NetScope streamlining plan
 
-- **Status:** Phases 0 through 4 and Phase 6 complete. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget. Phase 2 adds deterministic synthetic PCAP investigations and regression coverage. Phase 3 documents parser capability, hardens anomaly state, and defines inline-only anomaly semantics. Phase 4 adds checksummed deterministic workloads, source snapshots, raw offline measurements, and profile-guided removal of unused top-flow tracking. Phase 5's runner and runbook are complete, but its Linux live-loss measurement and exit gate remain pending.
+- **Status:** Phases 0 through 4, Phase 6, and Phase 7 are complete. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget. Phase 2 adds deterministic synthetic PCAP investigations and regression coverage. Phase 3 documents parser capability, hardens anomaly state, and defines inline-only anomaly semantics. Phase 4 adds checksummed deterministic workloads, source snapshots, raw offline measurements, and profile-guided removal of unused top-flow tracking. Phase 5's runner and runbook are complete, but its Linux live-loss measurement and exit gate remain pending.
 - **Change type:** Focused cleanup with explicit behavior changes where current behavior is misleading.
 - **Baseline inspected:** 2026-09-24, `main` at `6355f8c`.
 - **Target:** A dependable Rust packet and flow investigation tool with reproducible correctness and performance evidence.
@@ -95,7 +95,7 @@ The current repository already contains libpcap capture, classic PCAP reading, B
 | Integration tests write temporary one-packet PCAPs; no sample PCAP is tracked. | `tests/offline_read_pcap.rs`, `tests/pcap_rotation.rs` | A new reviewer cannot reproduce a meaningful investigation from the checkout. |
 | A fast offline file can finish before the periodic stats tick; the final summary lacks elapsed time and full processing counts. | `src/main.rs` inline and pipeline capture loops | Console stats are unsuitable as a benchmark data source. |
 | Offline pipeline dispatch uses `try_send`, so a fast file reader can drop packets when a worker queue is full. | `src/main.rs` pipeline capture loop | Offline results can be incomplete even though there is no live capture pressure. |
-| Pipeline anomalies were evaluated per worker, while routing hashes the canonical full flow tuple. Multiple sources attacking one destination can land on different workers. | `src/pipeline/router.rs`, `src/pipeline/worker.rs`, `docs/pipeline.md` | Phase 3 removes shard-local detectors and rejects pipeline runs with enabled anomaly detection before capture. |
+| Pipeline anomalies were evaluated per worker, while routing hashes the canonical full flow tuple. Multiple sources attacking one destination can land on different workers. | `src/pipeline/router.rs`, `src/pipeline/worker.rs` | Phase 3 removes shard-local detectors and rejects pipeline runs with enabled anomaly detection before capture. |
 | Anomaly cleanup retained stale events and cooldown keys for inactive sources. | `src/analysis/anomaly.rs` | Phase 3 sweeps expired entries every 30 seconds, prunes on observation, and shrinks retained queue/map capacity. |
 | The live throughput script starts replay before capture; the combined validation script uses macOS-specific `/usr/bin/time -l`. | `scripts/perf/validate-throughput.sh`, `scripts/perf/validate.sh` | Existing scripts cannot establish reliable loss or portable resource measurements. |
 | `.gitignore` contains literal Markdown fences; ignored `target/` output occupies about 6 GB locally. | `.gitignore`, local `target/` | Clean the ignore rules and generated output after a fresh build is reproducible. |
@@ -106,10 +106,10 @@ Delete a superseded path together with its code, tests, docs, config, and CI ref
 
 | Area | Planned disposition | Replacement or condition |
 | --- | --- | --- |
-| Documentation catalogue | Merge and delete 11 superseded guides listed in Phase 7. | Five concise reader-facing pages and one investigation guide. |
+| Documentation catalogue | Merge and delete 10 superseded standalone guides; keep the full CLI appendix in this plan. | Five concise reader-facing pages and one investigation guide. |
 | Unverifiable performance numbers | Remove the approximate results table from `docs/performance.md`. | Publish measured results with raw runs, host, commit, and PCAP hash. |
-| Old perf scripts | Retire `scripts/perf/validate.sh`, `validate-web.sh`, and their TOML profiles when the new runners and runbooks cover their jobs. `validate-throughput.sh` was removed in Phase 5. | One offline runner plus one controlled live procedure; no replay-before-capture loss measurement. |
-| Public synthetic-flow memory mode | Remove `--synthetic-flows` from the ordinary CLI and remove `src/memory.rs` if its only remaining use disappears. | Run scale-memory measurement from the developer benchmark harness. |
+| Old perf scripts | `validate-throughput.sh` was removed in Phase 5; Phase 7 retires `validate.sh` and its obsolete profiles and renames the useful dashboard smoke to `smoke-dashboard.sh`. | One offline runner plus one controlled live procedure; no replay-before-capture loss measurement. |
+| Public synthetic-flow memory mode | Removed `--synthetic-flows`, its table insertion helper, and `src/memory.rs` in Phase 7. | The offline runner measures process RSS while analyzing deterministic generated PCAPs. |
 | Ignore-rule clutter | Remove literal Markdown fences, duplicate patterns, and broad patterns with no project use from `.gitignore`. | Explicit rules for `target/`, local caches, generated traces, and benchmark output. |
 | Local generated output | Clean old ignored `target/` artifacts after a fresh build works. | Source, tracked fixtures, and user data remain untouched. |
 | Duplicate or unused runtime surface | Audit export variants, CLI flag pairs, config keys, web TLS/auth, and direct dependencies. | Remove only a slice with a tested replacement or a clear decision in the [change history appendix](#change-history); no speculative mass deletion. |
@@ -217,7 +217,7 @@ The tested/untested lists refer to long option names. Short aliases `-i`, `-f`, 
 
 The eight boolean override pairs are `--promiscuous`/`--no-promiscuous`, `--hex-dump`/`--no-hex-dump`, `--quiet`/`--no-quiet`, `--stats`/`--no-stats`, `--anomalies`/`--no-anomalies`, `--web`/`--no-web`, `--web-tls`/`--no-web-tls`, and `--web-auth`/`--no-web-auth`. Their mutual exclusion is declared in Clap, but their config-override behavior has no direct test in the baseline suite. Existing coverage tests clearable path overrides instead.
 
-**Internal-only:** `--synthetic-flows <N>` is the planned developer memory-measurement path, not an ordinary user workflow. A 10-flow smoke run exited 0, but macOS reported RSS as unavailable, so no memory figure or budget result was produced. The current `docs/performance.md` wording should be qualified by platform until the replacement benchmark runner exists.
+**Internal-only at the Phase 0 baseline:** `--synthetic-flows <N>` was a developer memory-measurement path, not an ordinary user workflow. A 10-flow smoke run exited 0, but macOS reported RSS as unavailable. Phase 7 removed this path after the Phase 4 offline runner began collecting process RSS on deterministic PCAP workloads.
 
 ##### TOML config keys
 
@@ -261,7 +261,7 @@ This is TOML-input coverage, not a claim that all corresponding code is untested
 | `anomaly-detection.md`: per-worker thresholds and cleanup | **Corrected after baseline** | Full-flow-tuple routing does not pin all sources for a destination to one shard; stale nonempty queues survive cleanup if their keys are never revisited. The guide now states both limits. |
 | `exports.md`: JSON, PCAP, and rotation outputs | **Tested** | Flow JSON and rotation integrations passed. CSV and expired-flow sinks have only partial serializer/path coverage. |
 | `web-dashboard.md`: health, auth, metrics, and WebSocket behavior | **Tested at unit level** | Test suite passed with loopback access. No live capture or browser session was run. |
-| `performance.md`: current benchmark table and memory check | **Untested** | The numbers lack raw environment/run records and remain microbenchmarks. On this Mac, `--synthetic-flows 10` could not report RSS or a budget result, so the memory-check wording needs qualification. |
+| `performance.md`: original benchmark table and memory check | **Replaced by Phases 4 and 7** | The old approximate numbers were removed. Current whole-program measurements cite raw workload hashes, run records, host metadata, and explicit limitations; the historical synthetic-flow probe remains only as baseline context. |
 | `development.md` and `troubleshooting.md`: developer scripts and operational recipes | **Untested** | The CI gates ran; the standalone replay and validation scripts were not run in this baseline. |
 
 #### Parser and capture limits
@@ -512,7 +512,7 @@ Live capture is a separate experiment because NIC, driver, kernel buffers, sched
 - [x] State when replay counts and capture counts have different meanings on the selected OS or interface. Use input packet identifiers or a controlled finite trace where practical to resolve ambiguous counts.
 - [x] Replace the current replay-before-capture scripts or keep them only as explicitly labeled manual smoke checks. The new procedure must never claim a clean loss result from a run that missed startup traffic.
 
-**Implementation status (2026-09-27): COMPLETE.** Added `scripts/perf/live-veth.sh` and `scripts/perf/live_capture.py`, plus the readiness event consumed by the runner. The runner generates a finite checksummed trace with unique TCP sequence identifiers, verifies every input packet against its fixed BPF filter, builds from a saved source snapshot, waits for NetScope's effective settings, repeats configured offered rates, bounds process waits, saves full run records, and produces a qualified report. The old throughput script was removed; `validate-web.sh` is now explicitly a manual dashboard smoke check and waits for the same readiness event before replay. See the [runbook and measurement limits](performance.md#live-capture-and-packet-loss) and the [current report](benchmarks/live-capture/report.md).
+**Implementation status (2026-09-27): COMPLETE.** Added `scripts/perf/live-veth.sh` and `scripts/perf/live_capture.py`, plus the readiness event consumed by the runner. The runner generates a finite checksummed trace with unique TCP sequence identifiers, verifies every input packet against its fixed BPF filter, builds from a saved source snapshot, waits for NetScope's effective settings, repeats configured offered rates, bounds process waits, saves full run records, and produces a qualified report. The old throughput script was removed; the former `validate-web.sh` dashboard smoke now lives at `scripts/perf/smoke-dashboard.sh` and waits for the same readiness event before replay. See the [runbook and measurement limits](performance.md#live-capture-and-packet-loss) and the [current report](benchmarks/live-capture/report.md).
 
 **Measurement status: PENDING.** The implementation host is macOS 27.0 without Linux `veth` support, so no live rate matrix or raw live runs were collected. The report records this limitation; the measured-rate step and exit gate remain open until the runner completes on Linux.
 
@@ -543,66 +543,76 @@ The comparison has two parts: a capability table and optional measured workloads
 
 ### 7.1 Restructure and reduce the documentation
 
-The legacy `docs/` set has 12 feature and reference pages with repeated setup, options, caveats, and cross-links. Target **five reader-facing pages plus this execution plan**. The README is the front door; `examples/README.md` holds the three investigations. Each topic has one canonical page.
+The existing guide set has ten overlapping standalone pages, plus this plan's full CLI appendix. Target **five reader-facing pages plus this execution plan**. The README is the front door; `examples/README.md` holds the synthetic investigations. Each topic has one canonical page.
 
 | Final location | Purpose | Migrate useful content from | Remove after migration |
 | --- | --- | --- | --- |
 | `README.md` | What NetScope does, one offline command, limits, and a short navigation list | Current README | Replace its long feature list and 13-row doc menu with a compact overview |
 | `docs/quickstart.md` | Build, first PCAP, live permissions, a few common commands, and brief troubleshooting | `getting-started.md`, `usage.md`, `troubleshooting.md` | All three old pages |
-| `docs/reference.md` | CLI/config defaults and precedence, export schemas, and concise option tables | `CLI appendix`, `configuration.md`, `exports.md` | All three old pages |
+| `docs/reference.md` | Config defaults and precedence, export schemas, and concise option tables; link to the full CLI appendix | Existing CLI appendix, `configuration.md`, `exports.md` | The two old standalone pages; retain the appendix here |
 | `docs/design.md` | Pipeline, flow model, supported protocol depth, anomaly semantics, dashboard behavior, and contributor notes | `pipeline.md`, `flow-tracking.md`, `anomaly-detection.md`, `web-dashboard.md`, `development.md` | All five old pages |
 | `docs/performance.md` | Benchmark method, measured results, tuning grounded in data, and live-loss method | Current `performance.md` | Replace its unsupported result table and repeated tuning prose |
 | `docs/comparison.md` | Honest tool roles and exact comparison commands | New Phase 6 work | No legacy page |
 | `docs/streamlining-plan.md` | Execution plan, baseline evidence, full CLI reference, and consolidated change history | This plan and the former CLI, Phase 0, and changelog documents | Retain as the single project record; do not recreate standalone CLI or changelog documents |
 
-- [ ] Migrate only accurate, useful content. Rewrite repeated paragraphs into a table, a command example, or a short explanation; do not paste old pages together into a larger wall of text.
-- [ ] Keep each reader page task-oriented: start with the answer or command, then include the minimum detail needed to use it correctly. Put exhaustive generated CLI help in `netscope --help` rather than prose copies of every flag.
-- [ ] Use one canonical source for defaults and option behavior. Ensure reference tables, example config, and `--help` agree; remove duplicate default tables elsewhere.
-- [ ] Replace the README's current long documentation menu with links to quickstart, examples, reference, design, performance, and comparison. Keep the plan link separate as an active-work item.
-- [ ] Search all Markdown links and command references before deleting any old page. Update README, examples, CI, and remaining docs, then check that no local link points to a removed file.
-- [ ] Delete the 11 superseded pages only after the new pages contain the necessary commands, caveats, and output schemas. Review the final docs list and remove placeholder pages that add no distinct value.
-- [ ] At final handoff, transfer durable product guidance and measured findings to the reader-facing docs. Retain this consolidated plan as the execution and change-history record.
+- [x] Migrate only accurate, useful content. Rewrite repeated paragraphs into tables, commands, or short explanations instead of concatenating the old pages.
+- [x] Keep each reader page task-oriented. Put exhaustive flag help in `netscope --help` and retain the compiled default table in this plan's CLI appendix.
+- [x] Use one canonical source for defaults and option behavior. Config tables and the example config were checked against the compiled config and CLI help; remove duplicate default tables elsewhere.
+- [x] Replace the README's long feature list and documentation menu with links to quickstart, examples, reference, design, performance, and comparison. Keep the plan link separate as an active-work item.
+- [x] Search Markdown links and commands before deletion. Update README, examples, CI, and remaining docs, then verify local links after removing the old pages.
+- [x] Delete the 10 superseded standalone pages after moving their useful commands, caveats, and schemas. Keep the CLI appendix here; it was not a separate current file.
+- [x] Transfer durable product guidance and measured findings to the reader-facing docs. Retain this consolidated plan as the execution and change-history record.
 
 **Documentation exit gate:** A reader can find the first runnable example in the README, answer a usage question from quickstart/reference, and understand the main tradeoffs from design/performance without following a chain of near-duplicate pages.
 
 ### 7.2 Remove other clutter with evidence
 
-- [ ] Remove literal Markdown fences and duplicate patterns from `.gitignore`. Ignore generated benchmark output and temporary traces while allowing intentional tracked sample PCAPs.
-- [ ] Replace stale or overlapping `scripts/perf/` entry points once the new runner and live runbook cover their workflows. Delete scripts that no longer have a tested purpose.
+- [x] Remove literal Markdown fences, duplicate patterns, and unrelated archive/dependency patterns from `.gitignore`. Ignore local benchmark output while leaving tracked example and smoke PCAPs visible to Git.
+- [x] Retire the overlapping `validate.sh` entry point and its obsolete benchmark profiles. Rename the useful manual dashboard check to `smoke-dashboard.sh`; retain the new offline and controlled live runners.
 - [x] Remove unsupported old benchmark numbers from `docs/performance.md`. Preserve a historical result only if its raw data, environment, and command can be recovered and labeled.
-- [ ] Remove `--synthetic-flows` from the ordinary CLI after the benchmark harness provides its replacement. Remove `src/memory.rs` if its remaining code is no longer used.
-- [ ] Audit unused dependencies, exports, config keys, and code paths with compiler and search evidence before removing them. Keep Chart.js licensing intact while the dashboard uses its vendored asset.
-- [ ] Clean ignored local build artifacts after the dependency/build path is verified. Do not delete tracked sample data or uncommitted user work as part of disk cleanup.
+- [x] Remove `--synthetic-flows` and its direct-insertion helper now that the offline runner measures RSS on generated PCAPs. Remove `src/memory.rs`, its `/proc` parser tests, and its last use; keep flow expiry/eviction coverage on parsed packets.
+- [x] Audit direct dependencies, public benchmark helpers, config keys, and code paths with compiler/search evidence. Remove the unused direct `tower-http` dependency; retain the other dependencies and product settings with active paths, and keep the vendored Chart.js license.
+- [x] After build and benchmark paths work, clean ignored Rust build output only. Leave temporary user data and tracked sample/benchmark evidence intact.
 
 ### 7.3 Make CI reflect the product
 
-- [ ] Run format, Clippy, unit and integration tests, release build, fixture hash verification, and nonprivileged offline smoke examples in CI.
-- [ ] Reuse the targeted fixture tests for inline/pipeline reconciliation, anomaly mode policy, and malformed input classifications. Add CI checks only for behavior that can regress independently.
-- [ ] Keep long performance and privileged live-replay jobs outside ordinary PR gates. Publish their results with machine metadata when they run.
-- [ ] Verify docs commands from a clean checkout, including exact relative paths and permissions. Check that the README, CLI help, and config reference agree.
+- [x] Run format, Clippy, unit/integration tests, release build, fixture hash verification, and nonprivileged offline smoke examples in CI.
+- [x] Reuse the targeted fixture tests for inline/pipeline reconciliation, anomaly mode policy, and malformed input classifications; add only the focused benchmark-helper checks.
+- [x] Keep long performance and privileged live-replay jobs outside ordinary PR gates. Their result formats retain host and machine metadata when they run.
+- [x] Verify documentation commands from a clean snapshot, including relative paths and permissions. Check the README, CLI help, config reference, example config, and compiled defaults for agreement.
 
 ### 7.4 Final review checklist
 
-- [ ] No generated large trace or benchmark cache is tracked accidentally.
-- [ ] Every public speed, memory, and loss number has raw evidence and caveats.
-- [ ] Sample PCAPs contain synthetic data only and regenerate to their manifest hashes.
-- [ ] Offline examples work without root; live examples state required privileges.
-- [ ] Exit codes and summaries expose partial processing and output failures.
-- [ ] `docs/` contains five reader pages plus this consolidated plan; superseded standalone pages and their links are gone.
-- [ ] The final diff removes more confusion than it adds, and each retained feature has a tested path.
+- [x] No generated large trace or benchmark cache is tracked accidentally; tracked performance PCAPs are small smoke workloads and raw records are retained as evidence.
+- [x] Every published speed or memory number links to raw runs and caveats. No live-loss number is published while the controlled Linux measurement remains pending.
+- [x] Sample PCAPs contain synthetic data only and regenerate to their manifest hashes.
+- [x] Offline examples run without root; live examples state their permission requirements.
+- [x] Exit codes and summaries expose partial processing and output failures, covered by focused integration cases.
+- [x] `docs/` has five root reader guides plus this plan; superseded standalone pages and local links are gone.
+- [x] The final diff removes duplicate paths while preserving a tested route for each retained feature.
 
 **Deliverables:** Focused README/docs, cleaned scripts and ignore rules, final CI workflow, an updated change-history appendix, and a reviewed plan-to-outcome crosswalk.
 
 **Exit gate:** A clean checkout passes CI, the sample investigations reproduce, and the performance and comparison pages cite concrete evidence.
 
+**Completion record (2026-09-27):** The documentation merge and release-gate changes are implemented. CI now runs format, locked Clippy, unit/integration tests, a locked release build, fixture verification, benchmark-helper checks, and unprivileged offline examples. The local equivalent checks passed: four example PCAPs (8, 16, 64, and 6 frames), the full config template, and both anomaly examples ran from a git-clean snapshot. The full Rust suite passed 158 tests after retrying with loopback access; the sandbox-only attempt blocked three WebSocket listener binds. The Phase 5 live-loss report remains explicitly pending because this macOS host cannot run the isolated Linux `veth` matrix; no live rate or loss claim is made.
+
+| Deliverable | Outcome and evidence |
+| --- | --- |
+| Reader docs | README front door plus `quickstart.md`, `reference.md`, `design.md`, `performance.md`, and `comparison.md`; ten superseded pages removed, links and heading anchors checked. |
+| CLI and benchmark cleanup | `--synthetic-flows`, its insertion helper and RSS utility removed; scale-mode expiry and eviction tests now use parsed TCP packets. Unused `tower-http` dependency removed. The old validation script and profiles are gone; the manual dashboard smoke command has a distinct documented name. |
+| Ignore rules and generated files | `.gitignore` is concise and protects `/tmp/perf/` and `/tmp/bench/`; `cargo clean` removed ignored Rust build output after validation. Tracked fixture and benchmark evidence remains. |
+| CI and clean-snapshot checks | Format, locked Clippy/test/release-build checks; fixture and Python helper tests; four nonprivileged smoke commands. CLI help matches the 48 long options in Appendix A. |
+
 ## Migration and breaking changes
 
 The cleanup should avoid gratuitous user-facing churn, but it should not keep a misleading compatibility path. Record every actual CLI, config, output-schema, and documentation-path change in the [change history appendix](#change-history).
 
-- `--synthetic-flows` is a developer measurement path scheduled to leave the normal CLI after its replacement exists. Benchmark scripts that call it must migrate to the new runner.
+- `--synthetic-flows` was removed after migration to the offline generated-PCAP runner. Scripts and documentation no longer call this developer-only option.
+- The public `netscope::memory` helper module and `FlowTracker::insert_synthetic_ipv4_flows` were removed with that benchmark-only CLI path; process RSS is measured outside NetScope by the offline runner.
 - If `--summary-json` is added, version its schema from the first release. Existing human-readable output remains for people, but scripts should consume JSON rather than scrape prose.
 - Phase 3 resolves anomaly semantics by restricting anomaly detection to inline mode. Keep the early pipeline rejection and do not restore per-worker thresholds under the same flag combination.
-- Consolidated docs replace 11 legacy paths. Update all repository links and commands before deletion; list moved topics in the [change history appendix](#change-history). Avoid maintaining 11 redirect stubs just to preserve the old catalogue.
+- Consolidated docs replace 10 superseded standalone guides. The full CLI appendix remains in this plan. All repository links were updated before deleting the old paths; no redirect stubs are kept.
 - Existing user PCAPs, flow exports, and alert files are data. The cleanup does not delete or rewrite them. A changed export schema needs a version note and a sample record.
 - Existing `target/` binaries and `tmp/` results are generated local artifacts. Cleaning them is separate from source removal and occurs only after the build and benchmark paths work.
 
@@ -674,13 +684,13 @@ The final handoff should state what changed, the exact verification commands tha
 <a id="cli-reference"></a>
 ## Appendix A — CLI reference
 
-This is the complete flag reference formerly maintained in `docs/cli-reference.md`. The configuration schema remains in [Configuration](configuration.md).
+This is the complete flag reference formerly maintained in `docs/cli-reference.md`. The configuration schema and output fields are in the [Reference guide](reference.md).
 
 ```
 Usage: netscope [OPTIONS]
 ```
 
-This section lists CLI flags only. Some runtime tuning knobs are config-file only; see [Configuration](configuration.md) for the full schema.
+This section lists CLI flags only. Some runtime tuning knobs are config-file only; see the [Reference guide](reference.md) for the full schema.
 
 Defaults below refer to the compiled defaults before any `--config` file is loaded. If a config file is present, explicitly provided CLI flags still take precedence.
 
@@ -750,7 +760,7 @@ Note: verbosity level `-vv` or higher also enables detailed per-packet output ev
 | `--no-anomalies`        | flag |         | Disable anomaly detection.                                                |
 | `--alerts-jsonl <PATH>` | path | (none)  | Write anomaly alerts as JSON lines to a file (inline mode; pipeline rejects enabled anomaly detection). |
 
-See [Anomaly Detection](anomaly-detection.md) for threshold configuration (requires a config file).
+See [Design: Anomaly heuristics](design.md#anomaly-heuristics) for the mode restriction and detector limits; thresholds are configured in `[analysis.anomalies]`.
 
 ### Web Dashboard
 
@@ -771,7 +781,7 @@ See [Anomaly Detection](anomaly-detection.md) for threshold configuration (requi
 
 Tick cadence, packet sampling, packet-buffer sizing, payload truncation, and richer auth/TLS defaults can be configured through the `[web]`, `[web.tls]`, and `[web.auth]` sections.
 
-See [Web Dashboard](web-dashboard.md) for full details.
+See [Design: Dashboard](design.md#dashboard) for runtime behavior and the [Reference guide](reference.md#web) for configuration defaults.
 
 ### Pipeline Options
 
@@ -782,14 +792,13 @@ See [Web Dashboard](web-dashboard.md) for full details.
 
 Queue sizing (`pipeline.channel_capacity`) is configured through the config file.
 
-See [Sharded Pipeline](pipeline.md) for architecture and tuning details.
+See [Design: Processing modes](design.md#processing-modes) for architecture and flow-budget behavior.
 
 ### General
 
 | Flag                    | Short | Description                                                                                                   |
 | ----------------------- | ----- | ------------------------------------------------------------------------------------------------------------- |
 | `--config <PATH>`       |       | Load a TOML configuration file. CLI flags override config values.                                             |
-| `--synthetic-flows <N>` |       | Insert `N` synthetic scale-mode flows and print memory stats, then exit. Useful for memory-budget validation. |
 | `--help`                | `-h`  | Print help text.                                                                                              |
 | `--version`             | `-V`  | Print version.                                                                                                |
 
@@ -837,6 +846,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Web dashboard hardening: optional HTTPS (`web.tls.*` / `--web-tls`) and HTTP Basic auth (`web.auth.*` / `--web-auth`).
 - Non-Ethernet packet parsing for Linux cooked capture (SLL), loopback NULL/LOOP, and raw IP datalink captures.
 - Development: pinned Rust toolchain via `rust-toolchain.toml` and added CI checks for formatting, clippy, and tests.
+- A compact README and task-oriented quickstart, reference, and design guides that consolidate the former setup, usage, config, export, pipeline, flow, anomaly, dashboard, and development pages.
+- CI coverage for benchmark-helper decisions, locked release builds, and unprivileged smoke runs of all checked-in PCAP investigations.
 
 #### Fixed
 
@@ -868,13 +879,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - IPv6 parsing now walks common extension headers to expose the effective transport protocol and payload offset.
 - IPv6 extension-header walk depth increased (bounded) to cover deeper valid chains.
 - Packet detail store now uses fixed-size O(1) slot storage keyed by packet id modulo capacity, with stale-id rejection outside the active window.
-- Local perf validation is now captured via `scripts/perf/validate.sh` (release build + representative benchmark + CLI synthetic-flow memory validation).
+- Peak RSS is measured by the offline runner on generated PCAP workloads; Criterion hot-path timing remains a separate command.
+- The manual live-dashboard check is `scripts/perf/smoke-dashboard.sh`; live-loss measurement uses the controlled `live_capture.py` procedure.
 - Internal refactors to improve maintainability (flow module split, shared output sinks, shared packet formatting helpers).
 - Flow CSV export avoids per-row string allocations by writing fields directly.
 - Perf helper scripts print `tcpreplay` install hints and removed stale accepted-baseline text.
 
 #### Removed
 
+- Ten superseded standalone guide pages after migrating their useful material to `quickstart.md`, `reference.md`, and `design.md`; the full CLI appendix remains in this plan.
+- `--synthetic-flows`, `FlowTracker::insert_synthetic_ipv4_flows`, and `src/memory.rs` after the offline PCAP runner replaced the memory-only benchmark path.
+- `scripts/perf/validate.sh`, `scripts/perf/perf-throughput.toml`, and `scripts/perf/perf-web.toml`; the manual dashboard check is retained as `scripts/perf/smoke-dashboard.sh` without a duplicate profile.
+- The unused direct `tower-http` dependency after source search found no use and the dependency tree showed no transitive consumer.
 - Removed low-signal and perf/size guard tests (including the ignored 1M-flow RSS budget test and layout size assertions).
 
 ### [0.2.0] - 2026-03-15

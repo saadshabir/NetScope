@@ -255,10 +255,21 @@ mod tests {
     #[test]
     fn maybe_expire_collect_reports_timeout_reason() {
         let mut tracker = FlowTracker::new(1.0, 1000, false, false, false);
-        tracker.insert_synthetic_ipv4_flows(1);
+        observe_tcp_segment(
+            &mut tracker,
+            1.0,
+            [10, 0, 0, 1],
+            [10, 0, 0, 2],
+            12345,
+            80,
+            1,
+            0,
+            0x02,
+            &[],
+        );
 
         let mut events = Vec::new();
-        let removed = tracker.maybe_expire_collect(2.0, &mut events);
+        let removed = tracker.maybe_expire_collect(2.1, &mut events);
         assert_eq!(removed, 1);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].reason, ExpiredFlowReason::Timeout);
@@ -270,7 +281,30 @@ mod tests {
     #[test]
     fn maybe_expire_collect_reports_eviction_reason() {
         let mut tracker = FlowTracker::new(0.0, 1, false, false, false);
-        tracker.insert_synthetic_ipv4_flows(2);
+        observe_tcp_segment(
+            &mut tracker,
+            1.0,
+            [10, 0, 0, 1],
+            [10, 0, 0, 2],
+            12345,
+            80,
+            1,
+            0,
+            0x02,
+            &[],
+        );
+        observe_tcp_segment(
+            &mut tracker,
+            1.1,
+            [10, 0, 0, 3],
+            [10, 0, 0, 2],
+            12346,
+            80,
+            1,
+            0,
+            0x02,
+            &[],
+        );
 
         let mut events = Vec::new();
         let removed = tracker.maybe_expire_collect(2.0, &mut events);

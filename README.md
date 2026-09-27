@@ -1,75 +1,27 @@
 # NetScope
 
-High-performance packet capture and protocol analysis tool built in Rust. Captures live network traffic, tracks bidirectional flows with TCP state and RTT estimation, detects anomalies, and serves a real-time web dashboard -- all from a single binary.
+NetScope is a Rust and libpcap tool for reading packet captures, summarizing bidirectional flows, and inspecting a small set of protocol and anomaly signals. Offline analysis runs without capture privileges; live capture and the optional local dashboard are available when needed.
 
-## Features
+Build and inspect the checked-in sample without root:
 
-- **Live packet capture** via libpcap with BPF filter support
-- **Offline pcap analysis** via `--read-pcap` (supports BPF filters; no elevated privileges required)
-- **Zero-copy protocol parsing** -- Ethernet, Linux SLL, loopback NULL/LOOP, raw IP, 802.1Q VLAN, 802.1ad QinQ (stacked VLAN), ARP, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6, DNS (UDP/53 decode), TLS ClientHello SNI extraction (best-effort, packet-level)
-- **Flow tracking** -- bidirectional counters, TCP state machine, RTT estimation, retransmission and out-of-order detection
-- **Scale-mode flow storage** -- compact internal flow tables activate automatically when deep TCP analysis is disabled
-- **Sharded pipeline** -- multi-core processing with lock-free per-shard flow tracking
-- **Anomaly detection** -- inline SYN flood and port scan alerts with configurable thresholds
-- **Web dashboard** -- real-time browser UI with throughput charts, top flows, packet inspector, alerts, and a perf overlay backed by merged websocket frames (Chart.js served locally for offline/airgapped use)
-- **Prometheus metrics** -- `/metrics` endpoint on the web server for scrape-friendly counters and gauges
-- **Live drop metrics** -- periodic kernel/libpcap drop and interface drop deltas/totals (CLI + dashboard)
-- **Export** -- flows to JSON/CSV, anomaly alerts to JSONL in inline mode, expired/evicted flows to JSONL or streaming CSV, packets to pcap (optional size-based rotation via `--write-pcap-rotate-mb` / `--write-pcap-max-files`)
-- **TOML configuration** with full CLI override support
-
-## Quickstart
-
-```bash
-# Build (Rust toolchain is pinned via rust-toolchain.toml; rustup will auto-install it)
-cargo build --release
-
-# List interfaces
-sudo ./target/release/netscope --list-interfaces
-
-# Capture on the default interface
-sudo ./target/release/netscope
-
-# Analyze an offline pcap (no sudo required)
-./target/release/netscope --read-pcap examples/pcaps/normal.pcap --config examples/anomaly-demo.toml --quiet --summary-json /tmp/netscope-normal-summary.json
-
-# Start the web dashboard (open http://127.0.0.1:8080; use https://... if TLS is enabled)
-sudo ./target/release/netscope --web --quiet
-
-# In another terminal, scrape Prometheus metrics
-curl http://127.0.0.1:8080/metrics
+```sh
+cargo build --locked --release
+./target/release/netscope --read-pcap examples/pcaps/normal.pcap --quiet
 ```
 
-Live capture requires elevated privileges (`sudo` or `CAP_NET_RAW` on Linux). Offline pcap analysis (`--read-pcap`) does not. The [synthetic PCAP investigations](examples/README.md) include reproducible normal, port-scan, SYN-flood, and parser-edge examples. For more workflows, including exports and dashboard behavior, see [Usage Examples](docs/usage.md) and [Web Dashboard](docs/web-dashboard.md).
+The parser supports Ethernet, Linux SLL, loopback, and raw IP captures, with bounded IPv6 extension walking. DNS inspection is limited to UDP/53; TLS SNI is best-effort from a complete ClientHello in one packet. SYN-flood and port-scan alerts are threshold heuristics supported in inline mode. See [Design](docs/design.md) for behavior and limits.
 
-## Documentation
+## Guides
 
-| Guide                                                 | Description                                                  |
-| ----------------------------------------------------- | ------------------------------------------------------------ |
-| **[Getting Started](docs/getting-started.md)**        | Prerequisites, building, permissions, first capture          |
-| **[Usage Examples](docs/usage.md)**                   | Common recipes and workflows                                 |
-| **[CLI Reference](docs/streamlining-plan.md#cli-reference)**            | Complete flag and option list                                |
-| **[Configuration](docs/configuration.md)**            | TOML config schema and precedence rules                      |
-| **[Web Dashboard](docs/web-dashboard.md)**            | Real-time browser UI setup and tuning                        |
-| **[Sharded Pipeline](docs/pipeline.md)**              | Multi-core architecture and tuning                           |
-| **[Flow Tracking](docs/flow-tracking.md)**             | Bidirectional flows, TCP state, RTT                           |
-| **[Anomaly Detection](docs/anomaly-detection.md)**    | SYN flood and port scan detection                             |
-| **[Exports](docs/exports.md)**                        | Output formats (JSON, CSV, JSONL, pcap)                      |
-| **[Performance](docs/performance.md)**                | Benchmarks and tuning checklist                              |
-| **[Streamlining Plan](docs/streamlining-plan.md)**       | Phased cleanup, correctness, examples, and measurement plan |
-| **[Troubleshooting](docs/troubleshooting.md)**        | Common issues and fixes                                      |
-| **[Development](docs/development.md)**                | Repo layout, tests, extending protocols                      |
+- [Quickstart](docs/quickstart.md) — build, first run, common commands, permissions, and troubleshooting.
+- [Synthetic PCAP investigations](examples/README.md) — normal traffic, the anomaly heuristics, and parser boundaries.
+- [Reference](docs/reference.md) — configuration defaults and schemas, exports, and command-line pointers.
+- [Design](docs/design.md) — processing modes, flows, protocol depth, anomalies, dashboard, and contributor notes.
+- [Performance](docs/performance.md) — reproducible offline measurements and the separate live-loss procedure.
+- [Tool comparison](docs/comparison.md) — what NetScope, tcpdump, TShark/Wireshark, Zeek, and Suricata are suited to.
 
-## Notes
-
-- Live capture typically requires **root privileges**. Offline pcap analysis (`--read-pcap`) does not. The web dashboard binds to `127.0.0.1` by default. For remote exposure, enable both `[web.tls]` and `[web.auth]` (or `--web-tls*` and `--web-auth*`).
-- IPv6 extension headers are partially supported: common headers are walked with a bounded depth (16) to find the effective transport payload and shard routing key.
-- Supported datalink types include Ethernet, Linux SLL, loopback NULL/LOOP, and raw IP. Other datalink types are currently reported as unsupported.
-- IPv4 non-initial fragments are skipped for flow tracking.
-- TLS SNI extraction is packet-level and best-effort. ClientHello messages split across TCP segments may be missed, ECH can hide the real SNI, and SNI is only surfaced when it looks like a valid ASCII hostname (labels `A-Za-z0-9-`).
-- Timestamps are formatted as `HH:MM:SS.microseconds` from UNIX-epoch UTC capture times.
+Active implementation record: [streamlining plan](docs/streamlining-plan.md).
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
-
-This project vendors Chart.js (MIT) for the embedded web dashboard. See `web/static/vendor/chartjs/LICENSE.md`.
+MIT License. See [LICENSE](LICENSE). The dashboard vendors Chart.js; its license is in `web/static/vendor/chartjs/LICENSE.md`.

@@ -6,7 +6,6 @@ pub mod config;
 pub mod display;
 pub mod flow;
 pub mod jsonl;
-pub mod memory;
 pub mod metrics;
 pub mod packet_format;
 pub mod pipeline;
