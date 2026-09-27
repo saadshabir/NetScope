@@ -66,3 +66,4 @@ htmlcov/
 ```
 .DS_Store
 tmp/perf-trace.pcap
+tmp/perf/live-capture/

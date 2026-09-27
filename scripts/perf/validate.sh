@@ -31,7 +31,7 @@ cat <<EOF
 Completed local automated checks.
 
 To re-run manual spot checks when needed:
-  scripts/perf/validate-throughput.sh <iface> <trace.pcap> [packet_count]
+  python3 scripts/perf/live_capture.py --output-dir tmp/perf/live-capture/<run-id>
   scripts/perf/validate-web.sh [iface] [trace.pcap]
 
 Artifacts:

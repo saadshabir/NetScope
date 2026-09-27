@@ -4,17 +4,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
+cat <<'EOF'
+Manual dashboard smoke only. This script does not measure throughput or packet
+loss. For loss measurements, use scripts/perf/live_capture.py on an isolated
+Linux veth pair.
+EOF
+
 usage() {
   cat <<'EOF'
 Usage:
   scripts/perf/validate-web.sh [interface] [trace.pcap]
 
-Examples:
-  scripts/perf/validate-web.sh
-  scripts/perf/validate-web.sh lo0 trace.pcap
-
-If interface+trace are provided, tcpreplay is started automatically.
-If omitted, start traffic separately and keep this script running.
+The optional trace is replayed only after NetScope prints its NETSCOPE_READY
+event. Replay is continuous and stops when you interrupt this script.
 
 Environment overrides:
   PPS=100000
@@ -26,13 +28,12 @@ EOF
 }
 
 if [[ $# -gt 2 ]]; then
-  usage
-  exit 1
+  usage >&2
+  exit 2
 fi
 
 IFACE="${1:-}"
 TRACE="${2:-}"
-
 PPS="${PPS:-100000}"
 CONFIG="${CONFIG:-scripts/perf/perf-web.toml}"
 BINARY="${BINARY:-./target/release/netscope}"
@@ -42,89 +43,96 @@ LOG_DIR="${LOG_DIR:-tmp/perf}"
 if [[ "$BINARY" != /* ]]; then
   BINARY="$(cd "$(dirname "$BINARY")" && pwd)/$(basename "$BINARY")"
 fi
-
 if [[ ! -f "$CONFIG" ]]; then
   echo "error: config file not found: $CONFIG" >&2
   exit 1
 fi
-
 if [[ -n "$TRACE" && ! -f "$TRACE" ]]; then
   echo "error: trace file not found: $TRACE" >&2
   exit 1
 fi
-
+if [[ -n "$TRACE" && -z "$IFACE" ]]; then
+  echo "error: an interface is required when a trace is provided" >&2
+  exit 1
+fi
+if [[ -n "$TRACE" && -z "$TCPREPLAY_BIN" ]]; then
+  echo "error: tcpreplay is required when replaying a trace" >&2
+  exit 1
+fi
 if [[ ! -x "$BINARY" ]]; then
   echo "info: release binary missing, building..."
-  cargo build --release
-fi
-
-if [[ -n "$TRACE" && -z "$IFACE" ]]; then
-  echo "error: interface is required when trace path is provided" >&2
-  exit 1
-fi
-
-if [[ -n "$IFACE" && -z "$TRACE" ]]; then
-  echo "error: trace path is required when interface is provided" >&2
-  exit 1
-fi
-
-if [[ -n "$IFACE" && -z "$TCPREPLAY_BIN" ]]; then
-  echo "error: tcpreplay is required when interface/trace are provided (install it and ensure it's on PATH)" >&2
-  echo "hint: macOS: brew install tcpreplay" >&2
-  echo "hint: Debian/Ubuntu: sudo apt-get install tcpreplay" >&2
-  exit 1
+  cargo build --locked --release
 fi
 
 mkdir -p "$LOG_DIR"
 STAMP="$(date +"%Y%m%d-%H%M%S")"
 APP_LOG="$LOG_DIR/${STAMP}.web.netscope.log"
 REPLAY_LOG="$LOG_DIR/${STAMP}.web.tcpreplay.log"
+CAPTURE_PID=""
+REPLAY_PID=""
 
-echo "== Web Validation (Target 3) =="
-echo "config: $CONFIG"
-echo "log:    $APP_LOG"
-if [[ -n "$IFACE" ]]; then
-  echo "replay: iface=$IFACE trace=$TRACE pps=$PPS"
-  echo "replay log: $REPLAY_LOG"
-fi
-
-replay_pid=""
-stop_replay() {
-  if [[ -n "$replay_pid" ]] && kill -0 "$replay_pid" >/dev/null 2>&1; then
-    kill -INT "$replay_pid" >/dev/null 2>&1 || true
-    wait "$replay_pid" 2>/dev/null || true
-    replay_pid=""
+stop_pid() {
+  local pid="$1"
+  if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
+    kill -INT "$pid" >/dev/null 2>&1 || true
+    for _ in {1..50}; do
+      if ! kill -0 "$pid" >/dev/null 2>&1; then
+        wait "$pid" 2>/dev/null || true
+        return 0
+      fi
+      state="$(ps -o stat= -p "$pid" 2>/dev/null || true)"
+      if [[ "$state" == Z* ]]; then
+        wait "$pid" 2>/dev/null || true
+        return 0
+      fi
+      sleep 0.1
+    done
+    kill -TERM "$pid" >/dev/null 2>&1 || true
+    wait "$pid" 2>/dev/null || true
   fi
 }
 
 cleanup() {
-  stop_replay
+  stop_pid "$REPLAY_PID"
+  stop_pid "$CAPTURE_PID"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
-if [[ -n "$IFACE" ]]; then
-  sudo "$TCPREPLAY_BIN" --intf1="$IFACE" --pps="$PPS" --loop=0 "$TRACE" >"$REPLAY_LOG" 2>&1 &
-  replay_pid="$!"
-  sleep 1
-fi
-
-echo
-echo "Starting NetScope web run. Open: http://127.0.0.1:8080/?perf=1"
-echo "Quick spot-check target: ~30fps, p99 < 100ms, drop 0."
-echo "Compare against previous runs in tmp/perf/ when regression-testing."
-echo "Let the overlay settle for ~30s; use a longer soak only when regression-testing."
-
-args=(
-  --config "$CONFIG"
-  --pipeline
-  --quiet
-  --web
-)
-
+args=(--config "$CONFIG" --pipeline --quiet --web)
 if [[ -n "$IFACE" ]]; then
   args+=(--interface "$IFACE")
 fi
 
-sudo "$BINARY" "${args[@]}" | tee "$APP_LOG"
+sudo "$BINARY" "${args[@]}" >"$APP_LOG" 2>&1 &
+CAPTURE_PID="$!"
 
-stop_replay
+ready=0
+for _ in {1..200}; do
+  if grep -Fq 'NETSCOPE_READY ' "$APP_LOG"; then
+    ready=1
+    break
+  fi
+  if ! kill -0 "$CAPTURE_PID" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$ready" -ne 1 ]]; then
+  echo "error: NetScope did not become ready; see $APP_LOG" >&2
+  exit 1
+fi
+
+echo "NetScope is ready. Settings:"
+grep -F 'NETSCOPE_READY ' "$APP_LOG" | tail -n 1
+echo "Open http://127.0.0.1:8080/?perf=1 to inspect the local dashboard."
+echo "This is a manual dashboard smoke check; it does not establish a packet-loss result."
+echo "Logs: $APP_LOG"
+
+if [[ -n "$TRACE" ]]; then
+  echo "Starting continuous replay after readiness: iface=$IFACE pps=$PPS"
+  sudo "$TCPREPLAY_BIN" --intf1="$IFACE" --pps="$PPS" --loop=0 "$TRACE" >"$REPLAY_LOG" 2>&1 &
+  REPLAY_PID="$!"
+  echo "Replay log: $REPLAY_LOG"
+fi
+
+wait "$CAPTURE_PID"
