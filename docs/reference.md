@@ -1,4 +1,4 @@
-# Configuration
+# Reference
 
 NetScope supports TOML configuration files for persistent settings. Load a config file with `--config`:
 
@@ -6,7 +6,7 @@ NetScope supports TOML configuration files for persistent settings. Load a confi
 sudo netscope --config netscope.toml
 ```
 
-This page is the authoritative configuration schema. The defaults in the tables below mirror the compiled defaults in `src/config.rs`.
+The configuration tables below are the source of truth for compiled TOML defaults. CLI flags override explicit TOML values, and TOML overrides compiled defaults. The complete CLI flag list and compiled flag defaults live in the [CLI appendix](streamlining-plan.md#cli-reference); `netscope --help` shows the options supported by the built binary.
 
 A full template is provided in [`netscope.example.toml`](../netscope.example.toml) at the repository root.
 
@@ -23,20 +23,21 @@ For boolean options, `--flag` and `--no-flag` pairs let you override in either d
 sudo netscope --config my.toml --no-quiet
 ```
 
-## CLI vs Config-only Settings
+## CLI and config-only settings
 
 The CLI exposes common capture, output, and mode toggles, but some tuning knobs are only available in TOML. Common config-only examples include:
 
 - `capture.buffer_size_mb` and `capture.immediate_mode`
 - `analysis.rtt`, `analysis.retrans`, and `analysis.out_of_order`
-- `web.tick_ms`, `web.top_n`, `web.packet_buffer`, `web.sample_rate`, `web.payload_bytes`, `web.tls.*`, and `web.auth.*`
+- `web.tick_ms`, `web.top_n`, `web.packet_buffer`, `web.sample_rate`, and `web.payload_bytes`
 - `pipeline.channel_capacity`
+- Inline `web.auth.password` (CLI supports a password file instead)
 
-Use [CLI appendix](streamlining-plan.md#cli-reference) for flag-level help and this page for the full config schema.
+Use the [CLI appendix](streamlining-plan.md#cli-reference) for all flags and this page for the full config schema.
 
 ## Path Fields
 
-In TOML, path fields (`capture.read_pcap`, `write_pcap`, `export_json`, `export_csv`, `expired_flows_jsonl`, `expired_flows_csv`, `alerts_jsonl`, `web.tls.cert_path`, `web.tls.key_path`, `web.auth.password_file`) accept file paths. Setting a path to an empty string (`""`) is treated as disabled -- equivalent to omitting the key entirely.
+In TOML, path fields (`capture.read_pcap`, `write_pcap`, `export_json`, `export_csv`, `summary_json`, `expired_flows_jsonl`, `expired_flows_csv`, `alerts_jsonl`, `web.tls.cert_path`, `web.tls.key_path`, `web.auth.password_file`) accept file paths. Setting an optional output or credential path to an empty string (`""`) disables it, equivalent to omitting that key.
 
 ```toml
 [output]
@@ -193,7 +194,7 @@ For safer operations, prefer `password_file` over inline `password` so credentia
 | `workers`          | int  | `0`     | Number of worker threads. 0 = auto-detect (half of CPU count, clamped 1..8).                       |
 | `channel_capacity` | int  | `4096`  | Bounded channel size per worker shard. Live capture drops and counts packets when full; offline PCAP processing waits for queue space. |
 
-For feature-specific explanations of these settings, see [Web Dashboard](web-dashboard.md), [Sharded Pipeline](pipeline.md), and the other focused guides. This page remains the source of truth for compiled defaults.
+For behavior behind these settings, see [Design](design.md). This page remains the source of truth for compiled defaults.
 
 ## Minimal Config Example
 
@@ -216,3 +217,85 @@ enabled = true
 ## Full Example
 
 See [`netscope.example.toml`](../netscope.example.toml) for a full template covering all sections with comments and representative optional keys. Use the tables above as the source of truth for compiled defaults.
+
+## Common command options
+
+| Task | Options | Notes |
+| --- | --- | --- |
+| Read a capture | `--read-pcap`, `--filter`, `--count` | Offline reading needs no capture privileges. |
+| Capture live traffic | `--interface`, `--filter`, `--snaplen`, `--timeout-ms` | Interface permissions are required. |
+| Save results | `--summary-json`, `--export-json`, `--export-csv`, `--alerts-jsonl`, `--expired-flows-jsonl`, `--expired-flows-csv` | The CLI appendix documents each option and mode restriction. |
+| Save captured packets | `--write-pcap`, `--write-pcap-rotate-mb`, `--write-pcap-max-files` | Rotation is bounded by a maximum retained segment count. |
+| Use multiple workers | `--pipeline`, `--workers` | Pipeline mode is opt-in; anomaly detection is inline-only. |
+| Start the dashboard | `--web`, `--web-bind`, `--web-port` | Local bind is the default. Use TLS and authentication for remote access. |
+
+## Export formats
+
+| Output | Format | Semantics |
+| --- | --- | --- |
+| `--write-pcap` | Classic pcap | Records capture-thread input before pipeline dispatch. Rotation writes numbered segments and requires both rotation options. |
+| `--export-json` | JSON array | Final snapshot of tracked flows, sorted by total bytes. |
+| `--export-csv` | CSV | One row per flow with a header; fields are numeric values, enum labels, and IP addresses. |
+| `--alerts-jsonl` | JSON Lines | Versioned anomaly records; available in inline mode only. |
+| `--expired-flows-jsonl` / `--expired-flows-csv` | JSON Lines / CSV | Flow records are written as they expire or are evicted, with a `reason` field. |
+| `--summary-json` | Versioned JSON object | Final input, parse, pipeline, flow, alert, drop, timing, and output-error accounting. Pipeline or live-only counters are `null` when unavailable. See [Phase 1's field contract](streamlining-plan.md#phase-1-implementation-details). |
+
+### CSV columns and file behavior
+
+`--export-csv` writes this header, then one row per tracked flow:
+
+```text
+protocol,endpoint_a_ip,endpoint_a_port,endpoint_b_ip,endpoint_b_port,first_seen,last_seen,duration_secs,packets_a_to_b,packets_b_to_a,bytes_a_to_b,bytes_b_to_a,packets_total,bytes_total,avg_bps,tcp_state,client,retransmissions,out_of_order,rtt_last_ms,rtt_min_ms,rtt_ewma_ms,rtt_samples
+```
+
+`--expired-flows-csv` uses the same columns prefixed by `ts,reason`. It appends to an existing file and writes the header only when the file is new or empty. `--export-csv` replaces an existing file. Both exports write unquoted comma-separated values; optional fields without a value are empty. The current columns contain numeric values, enum labels, and IP addresses.
+
+### Flow fields
+
+JSON flow exports contain these fields; CSV uses flattened endpoint columns. `endpoint_a` and `endpoint_b` are ordered canonically, so both traffic directions belong to one record.
+
+| Field | Meaning |
+| --- | --- |
+| `protocol`, `endpoint_a`, `endpoint_b` | Transport protocol and the two IP/port endpoints. |
+| `first_seen`, `last_seen`, `duration_secs` | Capture timestamps and elapsed flow duration. |
+| `packets_a_to_b`, `packets_b_to_a`, `bytes_a_to_b`, `bytes_b_to_a` | Directional packet and wire-byte totals. |
+| `packets_total`, `bytes_total`, `avg_bps` | Totals and average bit rate over the flow duration. |
+| `tcp_state`, `client` | Packet-inferred TCP state and SYN initiator; `null` where unavailable. |
+| `retransmissions`, `out_of_order` | Packet-level TCP sequence observations. |
+| `rtt_last_ms`, `rtt_min_ms`, `rtt_ewma_ms`, `rtt_samples` | RTT samples when deep TCP tracking is enabled; otherwise values are unavailable or zero. |
+
+Example flow object:
+
+```json
+{
+  "protocol": "tcp",
+  "endpoint_a": { "ip": "192.0.2.10", "port": 51514 },
+  "endpoint_b": { "ip": "198.51.100.20", "port": 443 },
+  "first_seen": 1706123400.123456,
+  "last_seen": 1706123460.654321,
+  "duration_secs": 60.530865,
+  "packets_a_to_b": 150,
+  "packets_b_to_a": 200,
+  "bytes_a_to_b": 12400,
+  "bytes_b_to_a": 485000,
+  "packets_total": 350,
+  "bytes_total": 497400,
+  "avg_bps": 65712.3,
+  "tcp_state": "established",
+  "client": "a_to_b",
+  "retransmissions": 2,
+  "out_of_order": 0,
+  "rtt_last_ms": 15.2,
+  "rtt_min_ms": 12.8,
+  "rtt_ewma_ms": 14.1,
+  "rtt_samples": 45
+}
+```
+
+Anomaly JSONL records include `schema_version`, `ts`, `kind`, available source/target identifiers, `window_secs`, threshold and observed counts, and a human-readable description. For example:
+
+```json
+{"schema_version":1,"ts":1706123456.789,"kind":"syn_flood","source_ip":null,"target_ip":"10.0.0.1","target_port":443,"window_secs":5.0,"thresholds":{"syn_count":200,"unique_sources":50,"unique_ports":null,"unique_hosts":null},"observed":{"syn_count":250,"unique_sources":60,"unique_ports":null,"unique_hosts":null},"description":"SYN flood suspected: 250 syns, 60 sources to 10.0.0.1:443"}
+```
+
+Expired-flow records add `ts` and `reason` (`timeout` or `eviction`) to the flow fields. The exact summary JSON contract remains in the execution plan so there is one canonical definition.

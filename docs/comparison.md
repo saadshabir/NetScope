@@ -115,7 +115,7 @@ NetScope's useful niche is a focused Rust implementation with a short offline pa
 
 Its limits matter when choosing it:
 
-- Protocol coverage is narrower than Wireshark/TShark. Supported decoding is documented in the [streamlining plan's protocol matrix](streamlining-plan.md#protocol-capability-matrix); unsupported protocols and malformed headers are accounted for rather than fully dissected.
+- Protocol coverage is narrower than Wireshark/TShark. Supported decoding is documented in the [protocol table](design.md#protocol-support-and-depth); unsupported protocols and malformed headers are accounted for rather than fully dissected.
 - DNS inspection is limited to UDP port 53 and the first question. TLS SNI is extracted only when a complete ClientHello is present in one captured TCP payload. There is no general TCP stream reassembly, TLS decryption, or broad application-layer session analysis.
 - SYN-flood and port-scan alerts are threshold heuristics, not signature-based detection or proof of malicious intent. Anomaly detection is currently supported in inline mode; pipeline mode rejects enabled anomaly detection.
 - The reproducible examples use classic Ethernet PCAPs. Do not assume an unlisted file format or link type is supported without checking it against the implementation and a fixture.

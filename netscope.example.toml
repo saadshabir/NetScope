@@ -1,6 +1,6 @@
 # Example NetScope config template.
 # CLI flags override these values when explicitly provided.
-# For field descriptions and authoritative defaults, see docs/configuration.md.
+# For field descriptions and authoritative defaults, see docs/reference.md.
 
 [capture]
 # interface = "en0"

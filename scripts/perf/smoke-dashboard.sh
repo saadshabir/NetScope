@@ -13,14 +13,13 @@ EOF
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/perf/validate-web.sh [interface] [trace.pcap]
+  scripts/perf/smoke-dashboard.sh [interface] [trace.pcap]
 
 The optional trace is replayed only after NetScope prints its NETSCOPE_READY
 event. Replay is continuous and stops when you interrupt this script.
 
 Environment overrides:
   PPS=100000
-  CONFIG=scripts/perf/perf-web.toml
   BINARY=./target/release/netscope
   TCPREPLAY_BIN=$(command -v tcpreplay)
   LOG_DIR=tmp/perf
@@ -35,17 +34,12 @@ fi
 IFACE="${1:-}"
 TRACE="${2:-}"
 PPS="${PPS:-100000}"
-CONFIG="${CONFIG:-scripts/perf/perf-web.toml}"
 BINARY="${BINARY:-./target/release/netscope}"
 TCPREPLAY_BIN="${TCPREPLAY_BIN:-$(command -v tcpreplay || true)}"
 LOG_DIR="${LOG_DIR:-tmp/perf}"
 
 if [[ "$BINARY" != /* ]]; then
-  BINARY="$(cd "$(dirname "$BINARY")" && pwd)/$(basename "$BINARY")"
-fi
-if [[ ! -f "$CONFIG" ]]; then
-  echo "error: config file not found: $CONFIG" >&2
-  exit 1
+  BINARY="$ROOT_DIR/${BINARY#./}"
 fi
 if [[ -n "$TRACE" && ! -f "$TRACE" ]]; then
   echo "error: trace file not found: $TRACE" >&2
@@ -60,6 +54,10 @@ if [[ -n "$TRACE" && -z "$TCPREPLAY_BIN" ]]; then
   exit 1
 fi
 if [[ ! -x "$BINARY" ]]; then
+  if [[ "$BINARY" != "$ROOT_DIR/target/release/netscope" ]]; then
+    echo "error: binary not found or not executable: $BINARY" >&2
+    exit 1
+  fi
   echo "info: release binary missing, building..."
   cargo build --locked --release
 fi
@@ -98,7 +96,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-args=(--config "$CONFIG" --pipeline --quiet --web)
+args=(--pipeline --quiet --web)
 if [[ -n "$IFACE" ]]; then
   args+=(--interface "$IFACE")
 fi

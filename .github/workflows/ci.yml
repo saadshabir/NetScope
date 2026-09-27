@@ -17,6 +17,9 @@ jobs:
       - name: Verify synthetic PCAP fixtures
         run: python3 scripts/generate_examples.py --check
 
+      - name: Check benchmark workload helpers
+        run: python3 -m unittest discover -s scripts/perf -p 'test_*.py'
+
       - name: Install system deps
         run: sudo apt-get update && sudo apt-get install -y libpcap-dev
 
@@ -33,7 +36,22 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test
+        run: cargo test --locked
+
+      - name: Release build
+        run: cargo build --locked --release
+
+      - name: Offline example smoke (no capture privileges)
+        shell: bash
+        run: |
+          output_dir="$(mktemp -d)"
+          trap 'rm -rf "$output_dir"' EXIT
+          for example in normal port-scan syn-flood protocol-edges; do
+            ./target/release/netscope \
+              --read-pcap "examples/pcaps/${example}.pcap" \
+              --quiet \
+              --summary-json "$output_dir/${example}.json"
+          done

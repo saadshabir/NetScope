@@ -104,68 +104,6 @@ impl FlowTracker {
         matches!(self.store, FlowStore::Scale { .. })
     }
 
-    /// Insert synthetic IPv4 flows directly into the table.
-    ///
-    /// This is used by memory verification tooling to stress the storage layer
-    /// without protocol parsing overhead.
-    pub fn insert_synthetic_ipv4_flows(&mut self, count: usize) {
-        #[inline]
-        fn ip_from_index(prefix_a: u8, prefix_b: u8, idx: u32) -> std::net::Ipv4Addr {
-            std::net::Ipv4Addr::new(
-                prefix_a,
-                prefix_b,
-                ((idx >> 8) & 0xFF) as u8,
-                (idx & 0xFF) as u8,
-            )
-        }
-
-        let previous_len = self.len();
-        match &mut self.store {
-            FlowStore::Scale {
-                time_base_ms,
-                flows_v4,
-                ..
-            } => {
-                if *time_base_ms == 0 {
-                    *time_base_ms = scale_base_ms(0.0);
-                }
-                for i in 0..count as u32 {
-                    let src_ip = ip_from_index(10, ((i >> 16) & 0xFF) as u8, i);
-                    let dst_ip = ip_from_index(172, 16, i);
-                    let src_port = 1024 + (i % 48_000) as u16;
-                    let dst_port = 80;
-                    let (key, _dir) =
-                        FlowKeyV4::new(FlowProtocol::Tcp, src_ip, src_port, dst_ip, dst_port);
-                    let base = *time_base_ms;
-                    flows_v4
-                        .entry(key)
-                        .or_insert_with(|| ScaleFlowEntry::new(0.0, FlowProtocol::Tcp, base));
-                }
-            }
-            FlowStore::Full(flows) => {
-                for i in 0..count as u32 {
-                    let src = Endpoint {
-                        ip: IpAddr::V4(ip_from_index(10, ((i >> 16) & 0xFF) as u8, i)),
-                        port: 1024 + (i % 48_000) as u16,
-                    };
-                    let dst = Endpoint {
-                        ip: IpAddr::V4(ip_from_index(172, 16, i)),
-                        port: 80,
-                    };
-                    let (key, _dir) = FlowKey::new(FlowProtocol::Tcp, src, dst);
-                    flows
-                        .entry(key)
-                        .or_insert_with(|| FlowEntry::new(0.0, FlowProtocol::Tcp));
-                }
-            }
-        }
-
-        self.stats.created = self
-            .stats
-            .created
-            .saturating_add(self.len().saturating_sub(previous_len) as u64);
-    }
-
     #[inline]
     pub fn observe(&mut self, ts: f64, wire_len: u64, packet: &ParsedPacket<'_>) {
         let (ips, skip_flow) = match &packet.network {

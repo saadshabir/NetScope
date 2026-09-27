@@ -106,9 +106,19 @@ python3 scripts/perf/repeat_scenarios.py \
 
 The benchmark scripts are separate from the live-capture/drop validation. A PCAP run cannot measure kernel or interface loss.
 
+For isolated component timing, run the Criterion harness separately:
+
+```sh
+cargo bench --locked --bench hot_path -- handshake_sequence
+```
+
+These results are useful for focused regressions but do not replace whole-program PCAP measurements.
+
 ## Live capture and packet loss
 
 Use the isolated Linux procedure in [`scripts/perf/live_capture.py`](../scripts/perf/live_capture.py). It creates one deterministic, finite `steady-flow` trace, sets up capture on the receiver end of a named `veth` pair, and runs each offered rate three times. The sender transmits only after NetScope emits `NETSCOPE_READY`; the event includes the selected interface, BPF filter, snaplen, requested capture buffer, promiscuous/immediate modes, worker count, and per-worker queue capacity.
+
+For a manual browser check of the live dashboard, `scripts/perf/smoke-dashboard.sh [interface] [trace.pcap]` waits for the same readiness event before optional continuous replay. It is a UI smoke check only and does not report packet loss.
 
 Create the isolated pair. The runner builds the release binary with `cargo build --locked --release` and saves the exact source inputs and build output before measuring:
 
@@ -172,4 +182,4 @@ The implementation host for this phase is macOS 27.0 and has no Linux `ip` utili
 - Lower `packet_buffer` to retain fewer dashboard packets.
 - For large flow-count runs, disable deep TCP analysis (`analysis.rtt = false`, `analysis.retrans = false`, `analysis.out_of_order = false`) to use scale-mode flow storage.
 
-The developer-only `--synthetic-flows` option measures flow-table insertion without PCAP parsing. It is not used for the process RSS or replay-throughput results above.
+Peak process RSS is measured by the offline runner while it processes a generated PCAP. This includes parsing, flow creation, and queue behavior for the selected workload; it is not a synthetic flow-table-only measurement. The workload manifest and each raw repetition are retained with the result.

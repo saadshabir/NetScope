@@ -1,9 +1,7 @@
 mod cli;
 
 use netscope::run_summary::{self, RunAccounting, RunSummary};
-use netscope::{
-    analysis, capture, config, display, flow, memory, metrics, pipeline, protocol, web,
-};
+use netscope::{analysis, capture, config, display, flow, metrics, pipeline, protocol, web};
 use netscope::{build_packet_data, maybe_analyze_anomaly, sinks};
 
 use clap::Parser;
@@ -19,11 +17,6 @@ fn main() {
     metrics::initialize();
 
     let args = cli::Cli::parse();
-
-    if let Some(count) = args.synthetic_flows {
-        run_synthetic_flow_memory(count);
-        return;
-    }
 
     // Initialize tracing/logging
     let log_level = match args.verbose {
@@ -65,36 +58,6 @@ fn main() {
     if let Err(e) = run_capture(&config, &running) {
         eprintln!("error: {}", e);
         std::process::exit(1);
-    }
-}
-
-fn run_synthetic_flow_memory(count: usize) {
-    let start = Instant::now();
-    let mut tracker = flow::FlowTracker::new(0.0, count.saturating_add(1), false, false, false);
-
-    if !tracker.is_scale_mode() {
-        eprintln!("error: synthetic flow benchmark requires scale mode");
-        std::process::exit(1);
-    }
-
-    tracker.insert_synthetic_ipv4_flows(count);
-    let elapsed = start.elapsed().as_secs_f64();
-    let rss_kb = memory::current_rss_kb().unwrap_or(0);
-
-    println!("Synthetic flow benchmark complete.");
-    println!("  Flows inserted:     {}", tracker.len());
-    println!("  Mode:               scale");
-    println!("  Elapsed:            {:.3}s", elapsed);
-    if rss_kb > 0 {
-        println!("  RSS (estimated):    {:.2} MB", rss_kb as f64 / 1024.0);
-        if rss_kb > 500 * 1024 {
-            eprintln!("  Budget check:       FAIL (> 500 MB)");
-            std::process::exit(2);
-        } else {
-            println!("  Budget check:       PASS (< 500 MB)");
-        }
-    } else {
-        println!("  RSS (estimated):    unavailable");
     }
 }
 
