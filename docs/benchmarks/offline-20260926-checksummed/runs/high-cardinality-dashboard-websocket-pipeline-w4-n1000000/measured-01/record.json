@@ -1,0 +1,250 @@
+{
+  "anomaly_detection_enabled": false,
+  "binary_sha256": "73daa40f6fdd5563c2fb74a2163efd331062485ada8c814aeed0ce385384282f",
+  "command": [
+    "/Users/saad/Desktop/Main/Personal/Projects/NetScope/target/release/netscope",
+    "--config",
+    "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-checksummed/runs/high-cardinality-dashboard-websocket-pipeline-w4-n1000000/measured-01/config.toml",
+    "--read-pcap",
+    "/var/folders/wl/fcppyd1s5zl2739rqdrlknrr0000gn/T/netscope-offline-bench-lkdn0pi_/high-cardinality-1000000.pcap",
+    "--quiet",
+    "--no-stats",
+    "--summary-json",
+    "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-checksummed/runs/high-cardinality-dashboard-websocket-pipeline-w4-n1000000/measured-01/summary.json",
+    "--no-anomalies",
+    "--web",
+    "--pipeline",
+    "--workers",
+    "4"
+  ],
+  "config_path": "runs/high-cardinality-dashboard-websocket-pipeline-w4-n1000000/measured-01/config.toml",
+  "dashboard_enabled": true,
+  "dashboard_probe": {
+    "frame_count": 6,
+    "frame_interval_ms_p50": 33.00791700000083,
+    "frame_interval_ms_p95": 38.96966699999993,
+    "frame_interval_ms_p99": 38.96966699999993,
+    "frame_sequence_gaps": 0,
+    "frames": [
+      {
+        "arrival_monotonic_seconds": 12.737810291,
+        "frame_seq": 0,
+        "packet_samples": 119,
+        "payload_bytes": 22432,
+        "server_ts": 1790459372232
+      },
+      {
+        "arrival_monotonic_seconds": 12.773833833,
+        "frame_seq": 1,
+        "packet_samples": 189,
+        "payload_bytes": 33654,
+        "server_ts": 1790459372268
+      },
+      {
+        "arrival_monotonic_seconds": 12.804031541,
+        "frame_seq": 2,
+        "packet_samples": 159,
+        "payload_bytes": 28811,
+        "server_ts": 1790459372298
+      },
+      {
+        "arrival_monotonic_seconds": 12.836741041,
+        "frame_seq": 3,
+        "packet_samples": 188,
+        "payload_bytes": 33377,
+        "server_ts": 1790459372331
+      },
+      {
+        "arrival_monotonic_seconds": 12.869748958,
+        "frame_seq": 4,
+        "packet_samples": 193,
+        "payload_bytes": 34154,
+        "server_ts": 1790459372364
+      },
+      {
+        "arrival_monotonic_seconds": 12.908718625,
+        "frame_seq": 5,
+        "packet_samples": 147,
+        "payload_bytes": 27037,
+        "server_ts": 1790459372403
+      }
+    ],
+    "frames_per_second": 26.909263604590425,
+    "hello_received": true,
+    "measured_seconds": 0.2229715419999998,
+    "measurement_limit": "server-to-local-WebSocket-client delivery; does not measure browser rendering",
+    "packet_samples_received": 995,
+    "websocket_payload_bytes": 179691
+  },
+  "elapsed_wall_seconds": 0.23097704199999924,
+  "exit_code": 0,
+  "metrics": {
+    "bit_throughput_mbps_decimal": 1870.3157519871668,
+    "cpu_seconds_per_million_packets": 1.01,
+    "cpu_utilization_percent": 437.2728957192218,
+    "elapsed_wall_seconds": 0.23097704199999924,
+    "input_wire_bytes": 54000000,
+    "packet_throughput_per_second": 4329434.611081405,
+    "peak_rss_bytes": 600686592,
+    "peak_rss_mib": 572.859375,
+    "processed_packets": 1000000,
+    "system_cpu_seconds": 0.11,
+    "total_cpu_seconds": 1.01,
+    "user_cpu_seconds": 0.9
+  },
+  "mode": "pipeline",
+  "phase": "measured",
+  "raw_resource_output_path": "runs/high-cardinality-dashboard-websocket-pipeline-w4-n1000000/measured-01/resource-output.txt",
+  "raw_stderr_path": "runs/high-cardinality-dashboard-websocket-pipeline-w4-n1000000/measured-01/stderr.txt",
+  "raw_stdout_path": "runs/high-cardinality-dashboard-websocket-pipeline-w4-n1000000/measured-01/stdout.txt",
+  "repetition": 1,
+  "requested_workers": 4,
+  "resource_adapter": "macos-bsd-time-l",
+  "resource_readings": {
+    "peak_rss_bytes": 600686592,
+    "system_cpu_seconds": 0.11,
+    "user_cpu_seconds": 0.9,
+    "wall_seconds_reported_by_time": 0.22
+  },
+  "run_id": "high-cardinality-dashboard-websocket-pipeline-w4-n1000000-measured-01",
+  "run_summary": {
+    "alerts_emitted": 0,
+    "application_version": "0.1.0",
+    "dispatch_drops": 0,
+    "dispatched_frames": 1000000,
+    "effective_config": {
+      "anomaly_detection": false,
+      "anomaly_settings": {
+        "enabled": false,
+        "port_scan": {
+          "cooldown_secs": 30.0,
+          "enabled": false,
+          "unique_hosts_threshold": 10,
+          "unique_ports_threshold": 25,
+          "window_secs": 10.0
+        },
+        "syn_flood": {
+          "cooldown_secs": 10.0,
+          "enabled": true,
+          "syn_threshold": 200,
+          "unique_src_threshold": 50,
+          "window_secs": 5.0
+        }
+      },
+      "capture": {
+        "buffer_size_mb": null,
+        "filter": null,
+        "immediate_mode": false,
+        "link_type": "Ethernet",
+        "promiscuous": null,
+        "snaplen": 65535,
+        "timeout_ms": 100
+      },
+      "flow_timeout_secs": 0.0,
+      "max_flows": 0,
+      "out_of_order_tracking": false,
+      "output": {
+        "alerts_jsonl": null,
+        "expired_flows_csv": null,
+        "expired_flows_jsonl": null,
+        "export_csv": null,
+        "export_json": null,
+        "hex_dump": false,
+        "quiet": true,
+        "summary_json": "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-checksummed/runs/high-cardinality-dashboard-websocket-pipeline-w4-n1000000/measured-01/summary.json",
+        "write_pcap": null,
+        "write_pcap_max_files": 0,
+        "write_pcap_rotate_mb": 0
+      },
+      "packet_limit": 0,
+      "pipeline_channel_capacity": 4096,
+      "pipeline_enabled": true,
+      "requested_workers": 4,
+      "retransmission_tracking": false,
+      "rtt_tracking": false,
+      "stats": {
+        "enabled": false,
+        "interval_ms": 1000,
+        "top_flows": 0
+      },
+      "web": {
+        "auth_enabled": false,
+        "bind": "127.0.0.1",
+        "enabled": true,
+        "packet_buffer": 256,
+        "payload_bytes": 64,
+        "port": 51681,
+        "sample_rate": 1000,
+        "tick_ms": 33,
+        "tls_enabled": false,
+        "top_n": 10
+      }
+    },
+    "elapsed_wall_seconds": 0.215143875,
+    "flows_created": 1000000,
+    "flows_evicted": 0,
+    "flows_expired": 0,
+    "frames_read": 1000000,
+    "input_wire_bytes": 54000000,
+    "interface_drops": null,
+    "kernel_drops": null,
+    "malformed_or_unsupported_packets": 0,
+    "mode": "pipeline",
+    "output_errors": [],
+    "packet_parse_errors": 0,
+    "packets_parsed": 1000000,
+    "packets_with_network_header": 1000000,
+    "packets_with_transport_header": 1000000,
+    "run_error": null,
+    "schema_version": 1,
+    "source": "pcap:/var/folders/wl/fcppyd1s5zl2739rqdrlknrr0000gn/T/netscope-offline-bench-lkdn0pi_/high-cardinality-1000000.pcap",
+    "status": "success",
+    "transport_parse_errors": 0,
+    "unsupported_packets": 0,
+    "worker_count": 4,
+    "worker_failures": 0,
+    "worker_processed_frames": 1000000
+  },
+  "scenario_id": "high-cardinality-dashboard-websocket-pipeline-w4-n1000000",
+  "schema_version": 1,
+  "source_commit": "f85891b6a61f611bac90535082f75d88838d27e5",
+  "source_dirty": true,
+  "source_tree_sha256": "60d7b6ce1113d8f8760b81ddd6f690e596bc8a57c122b02fe0e5d619becb2a1d",
+  "started_at_utc": "2026-09-26T21:49:32Z",
+  "validation": {
+    "errors": [],
+    "passed": true
+  },
+  "workload": {
+    "captured_length_equals_wire_length": true,
+    "checksums": "valid IPv4, TCP, UDP, and ICMP Internet checksums",
+    "description": "Small TCP SYN packets create distinct flows.",
+    "flow_cardinality": 1000000,
+    "flow_cardinality_definition": "Distinct IPv4 five-tuples for TCP and UDP packets; ICMP does not create tracked flows.",
+    "generator": "scripts/perf/workloads.py",
+    "link_type": "Ethernet (DLT_EN10MB, 1)",
+    "manifest_path": "workloads/high-cardinality-1000000.manifest.json",
+    "packet_count": 1000000,
+    "packet_size_distribution_bytes": {
+      "54": 1000000
+    },
+    "pcap_bytes": 70000024,
+    "pcap_file": "high-cardinality-1000000.pcap",
+    "pcap_retained": false,
+    "pcap_sha256": "9ad23f606512dba3dc7e346ab14e0c7969a808936d55230cbbe4e0fdf3b22c5c",
+    "protocol_mix_packets": {
+      "tcp": 1000000
+    },
+    "provenance": "Generated locally from fixed seeds; contains no captured user or network traffic.",
+    "regeneration_command": "python3 scripts/perf/workloads.py --output-dir <dir> --workload high-cardinality --packets 1000000",
+    "schema_version": 2,
+    "seed": "0x4e45523243401205",
+    "synthetic": true,
+    "timestamp_end_unix_seconds": 1800000000.999999,
+    "timestamp_spacing_microseconds": 1,
+    "timestamp_start_unix_seconds": 1800000000,
+    "trace_path": "generated-temporary/high-cardinality-1000000.pcap (deleted after run)",
+    "wire_bytes": 54000000,
+    "workload": "high-cardinality"
+  }
+}

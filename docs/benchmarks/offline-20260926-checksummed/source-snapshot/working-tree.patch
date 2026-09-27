@@ -1,0 +1,367 @@
+diff --git a/docs/performance.md b/docs/performance.md
+index ff19e18..0027d95 100644
+--- a/docs/performance.md
++++ b/docs/performance.md
+@@ -1,123 +1,136 @@
+ # Performance
+ 
+-NetScope is designed for high-throughput packet processing. This page covers benchmark results, how to run benchmarks, and tuning guidance.
++This page documents NetScope's offline benchmark system and its first profile-guided change. The saved reports are the source for measured numbers; Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
+ 
+-For authoritative defaults referenced by the tuning examples here, see [Configuration](configuration.md) and `src/config.rs`.
++## Results
+ 
+-## Optimizations
++The baseline and optimized suites ran on the same Apple M4 host (10 logical CPUs, 16 GiB RAM, macOS 27, Rust 1.93.1). The environment probe could not identify the libpcap version and records it as unavailable. The reports include commands, source and binary hashes, workload hashes, configs, raw run output, summaries, OS resource output, system load readings, and all measured repetitions. These first suites used synthetic packets with zero checksums. Their application source is recoverable from the recorded commit and the saved [optimized application patch](benchmarks/offline-20260926-after/source-snapshot/application.patch), but the original dirty runner revisions were not retained. Treat these reports as historical measurements, not fully rebuildable source snapshots.
+ 
+-NetScope uses several performance-focused design choices on the hot path:
++- [Baseline report and raw records](benchmarks/offline-20260926-first/report.md)
++- [Optimized report and raw records](benchmarks/offline-20260926-after/report.md)
++- [10,000-packet smoke PCAPs and manifests](benchmarks/workloads-10k-smoke/)
++- [Historical zero-checksum generator](benchmarks/legacy-workloads-v1.py) for regenerating the original report inputs
+ 
+-- **Zero-copy parsing** -- protocol headers are parsed as views over the original byte slice, with no allocations or copies.
+-- **Fast hashing** -- hot-path flow/anomaly maps use `ahash` (`AHashMap`/`AHashSet`) to reduce per-lookup hashing cost.
+-- **Partial top-N selection** -- uses `select_nth_unstable_by` to partition the top-N elements in O(F) time, then sorts only that slice.
+-- **Pipeline sharding (optional)** -- in `--pipeline` mode, each worker owns its own `FlowTracker`, avoiding shared hot-path contention. Anomaly detection is inline-only because worker-local thresholds would not match global thresholds.
+-- **Web tick batching** -- the web server ships one merged frame per tick (stats + sampled packets + alerts) and resyncs lagged clients by sending only the latest frame.
+-- **Pipeline top-flows fast path** -- workers use a fixed-size SpaceSaving-style tracker to choose a bounded candidate set, then recompute exact deltas for those candidates before building the dashboard payload.
+-- **Scale-mode flow storage** -- when `analysis.rtt = false`, `analysis.retrans = false`, and `analysis.out_of_order = false`, flow tracking switches to compact split IPv4/IPv6 tables (`ScaleFlowEntry`) to reduce per-flow memory overhead.
++Profile sampling found frequent hash-map iterator folding while each pipeline worker selected top-flow candidates, including when both stats and dashboard output were disabled. Pipeline setup now disables heavy-hitter collection unless one of those consumers is enabled. The follow-up profile no longer samples that iterator-fold path; insertion and growth of the actual flow table remain visible. See the [baseline profile](benchmarks/offline-20260926-first/profiling/baseline-high-cardinality-5m-pipeline-w4/profile.json) and [follow-up profile](benchmarks/offline-20260926-after/profiling/high-cardinality-5m-pipeline-w4/profile.json).
+ 
+-## Benchmark Results
++The table compares matching 100,000-packet runs with the same PCAP hashes, configs, worker counts, and host. Ranges overlap, so these results do not support a reliable throughput-gain claim.
+ 
+-Criterion benchmarks measured on Apple M-series (`cargo bench`):
++| Scenario | Baseline packets/s median [range] | After packets/s median [range] | Median change |
++| --- | ---: | ---: | ---: |
++| High-cardinality, pipeline, 2 workers | 1,291,539 [1,289,962–1,353,549] | 1,373,622 [1,290,062–1,402,089] | +6.4% |
++| High-cardinality, pipeline, 4 workers | 1,327,128 [1,288,656–1,355,362] | 1,352,880 [1,289,442–1,418,952] | +1.9% |
++| Mixed, pipeline, 2 workers | 1,309,804 [1,289,200–1,365,359] | 1,351,786 [1,335,020–1,353,946] | +3.2% |
+ 
+-| Benchmark                                  | Latency     | Throughput  |
+-| ------------------------------------------ | ----------- | ----------- |
+-| `parse_packet` (54B TCP SYN)               | ~5.8 ns     | ~172M pkt/s |
+-| `parse_packet` (1454B TCP data)            | ~5.8 ns     | ~173M pkt/s |
+-| `flow_observe` (existing flow)             | ~25 ns      | ~40M pkt/s  |
+-| `flow_observe` (new flow, cold setup)      | ~7.7 us     | ~130k pkt/s |
+-| `shard_routing` (4 shards)                 | ~4.1 ns     | ~246M pkt/s |
+-| `handshake_sequence` (SYN → SYN-ACK → ACK) | ~105 ns/pkt | ~9.6M pkt/s |
++All offline runs reconciled generated input counts with the final summary and recorded zero pipeline dispatch drops and worker failures. These file-replay results say nothing about packets dropped before a PCAP was created. The dashboard probe measures server-to-local-WebSocket delivery, frame cadence, and sequence gaps; it does not measure browser rendering or paint latency. Several repeat batches showed wide run-to-run or batch-to-batch variation. Both reports retain every run and mark pooled spreads above 10% as provisional; neither selects the fastest repetition.
+ 
+-These numbers reflect isolated function-level performance measured by Criterion and will vary by CPU, compiler version, and background load.
+-The `flow_observe (new flow, cold setup)` benchmark includes flow tracker setup and is intended to represent a cold-path baseline rather than steady-state capture.
+-Actual capture throughput depends on the OS, NIC driver, libpcap configuration, and workload.
++## Recreating workloads
+ 
+-## Running Benchmarks
++`scripts/perf/workloads.py` streams deterministic synthetic classic-PCAP records to disk and writes a sidecar manifest with the seed, SHA-256, count, byte totals, packet-size distribution, protocol mix, distinct flow cardinality, and timestamp spacing. Version 2 generates valid IPv4, TCP, UDP, and ICMP checksums. It supports `steady-flow`, `high-cardinality`, `mixed`, and `analysis-heavy` traffic. The steady-flow trace starts midstream with ACK packets; it does not model a TCP handshake.
++
++Generate a short smoke trace for each workload:
++
++```bash
++python3 scripts/perf/workloads.py \
++  --output-dir tmp/perf/workloads-10k \
++  --workload all \
++  --counts 10000
++```
++
++Generate larger high-cardinality inputs when profiling or checking scale:
+ 
+ ```bash
+-cargo bench
++python3 scripts/perf/workloads.py \
++  --output-dir tmp/perf/high-cardinality \
++  --workload high-cardinality \
++  --counts 100000,1000000,5000000
+ ```
+ 
+-This runs the Criterion benchmarks defined in `benches/hot_path.rs`. Results are written to `target/criterion/` with HTML reports.
++The runner creates its input traces in a temporary directory and records their manifest and hash in `results.json`; it removes the large PCAPs after each suite.
+ 
+-For repeatable end-to-end checks (pcap replay throughput, web dashboard fps/latency, etc.), see `scripts/perf/`.
++## Running the offline suite
+ 
+-Note: replay-based perf checks (`scripts/perf/validate-throughput.sh`, `scripts/perf/validate-web.sh`) require `tcpreplay`.
+-On macOS: `brew install tcpreplay`. On Debian/Ubuntu: `sudo apt-get install tcpreplay`.
++The release runner builds with `cargo build --locked --release`, records the source commit, dirty state and source fingerprint, and saves the exact tracked patch and untracked files in `source-snapshot/`. It refuses to publish if source files change during the build or measurement. Each scenario gets a warm-up and at least five measured repetitions. A record includes the command, copied config, stdout, stderr, exit code, final summary, resource readings, and validation result. `scripts/perf/result.schema.json` documents the versioned JSON envelope. To rebuild a dirty-tree run, start from its recorded commit in a clean checkout and follow the saved `source-snapshot/README.md`.
+ 
+-For a single command that captures a small set of representative local checks (release build, one hot-path benchmark, and synthetic-flow memory validation), run:
++Run all four workload families inline and the three pipeline-supported families with explicit worker counts. `analysis-heavy` enables anomaly detection, which Phase 3 intentionally restricts to inline mode:
+ 
+ ```bash
+-scripts/perf/validate.sh
++python3 scripts/perf/run_offline.py \
++  --output-dir tmp/perf/offline-100k \
++  --packets 100000 \
++  --repetitions 5 \
++  --warmups 1 \
++  --workers 2,4
+ ```
+ 
+-Logs are written under `tmp/perf/`.
+-
+-To run a specific benchmark:
++Measure the dashboard in a separate high-cardinality pipeline scenario with a local WebSocket client:
+ 
+ ```bash
+-cargo bench --bench hot_path -- parse_packet
+-cargo bench --bench hot_path -- flow_observe
+-cargo bench --bench hot_path -- shard_routing
+-cargo bench --bench hot_path -- handshake_sequence
++python3 scripts/perf/run_offline.py \
++  --output-dir tmp/perf/dashboard-1m \
++  --packets 100000 \
++  --repetitions 5 \
++  --warmups 1 \
++  --workers 2,4 \
++  --dashboard \
++  --dashboard-packets 1000000
+ ```
+ 
+-## Tuning Checklist
++The runner reports medians and min–max ranges for packet throughput, decimal Mbps, process CPU, CPU seconds per million packets, and peak RSS. Timing begins at process launch and includes PCAP open/read, processing, summary output, and shutdown; it excludes compilation and trace generation. CPU and memory measurements are collected outside NetScope's packet-processing path. macOS uses `/usr/bin/time -l`; Linux uses `/usr/bin/time` and `perf` adapters. The Linux adapter is implemented but has not been exercised on this macOS host.
+ 
+-### Reducing kernel drops
++To collect a separate CPU profile without mixing profiler overhead into timed repetitions:
+ 
+-- Use a BPF filter (`-f "..."`) to reduce the volume of traffic entering the capture pipeline.
+-- Reduce `--snaplen` when you only need headers (smaller packets = less copy/parse work and less memory bandwidth used per packet copied to userspace).
+-- Increase libpcap buffer size via config: `capture.buffer_size_mb = 8` (or higher for bursty traffic).
+-- Consider `capture.immediate_mode = true` (best-effort; depends on libpcap support).
+-- Enable pipeline mode (`--pipeline`) to parallelize processing.
++```bash
++python3 scripts/perf/profile_offline.py \
++  --output-dir tmp/perf/profile-high-cardinality-5m \
++  --workload high-cardinality \
++  --packets 5000000 \
++  --mode pipeline \
++  --workers 4 \
++  --duration-seconds 1
++```
+ 
+-Example perf-oriented capture config:
++When a pooled throughput range exceeds 10% of its median, repeat selected scenario IDs with the same saved binary and regenerated PCAP hashes. Supplemental batches collect their own host, power state, and load readings:
+ 
+-```toml
+-[capture]
+-timeout_ms = 1
+-buffer_size_mb = 8
+-immediate_mode = true
++```bash
++python3 scripts/perf/repeat_scenarios.py \
++  --baseline tmp/perf/offline-100k \
++  --output-dir tmp/perf/offline-100k-repeat \
++  --scenario-id high-cardinality-pipeline-w4-n100000 \
++  --repetitions 5 \
++  --warmups 1
+ ```
+ 
+-### Reducing dispatch drops (pipeline mode)
++The benchmark scripts are separate from the live-capture/drop validation. A PCAP run cannot measure kernel or interface loss.
+ 
+-- Increase `channel_capacity` in the `[pipeline]` config section (default: 4096). Higher values use more memory.
+-- Add more workers (`--workers N`).
+-- Apply a BPF filter to reduce packet volume.
++## Tuning
+ 
+-### Reducing web dashboard load
+-
+-- Increase `sample_rate` (e.g., `sample_rate = 10` sends every 10th packet).
+-- Set `sample_rate = 0` to disable the live packet feed.
+-- `sample_rate` is capture-wide in both inline and pipeline modes, so increasing it reduces total packet samples rather than samples per shard.
+-- Reduce `top_n` (fewer flows per tick).
+-- Increase `tick_ms` (less frequent stats updates). Use `33` for roughly 30fps when you want smooth live updates.
+-- Reduce `payload_bytes` (smaller hex dumps per packet).
+-- Use `?perf=1` in the dashboard URL to inspect fps, latency p50/p95/p99, dropped frames, and client/server clock offset while tuning.
++### Reducing kernel drops
+ 
+-### Reducing memory usage
++- Use a BPF filter (`-f "..."`) to reduce traffic entering the capture pipeline.
++- Reduce `--snaplen` when only headers are needed.
++- Increase `capture.buffer_size_mb` for bursty live traffic.
++- Consider `capture.immediate_mode = true` where libpcap supports it.
++- Use `--pipeline` to parallelize processing, then measure under a controlled live setup.
+ 
+-- Lower `max_flows` to cap the flow table size.
+-- Reduce `flow.timeout_secs` to expire flows sooner.
+-- Lower `packet_buffer` to keep fewer packets in the web dashboard ring buffer.
+-- In pipeline mode, `max_flows` is a total budget split among worker shards. A busy shard can evict flows while another still has unused quota; pruning runs at most once per second.
+-- For large flow-count runs, disable deep TCP analysis (`analysis.rtt = false`, `analysis.retrans = false`, `analysis.out_of_order = false`) to activate scale-mode flow storage.
++### Reducing live dispatch drops
+ 
+-### Memory validation
++- Increase `pipeline.channel_capacity`; larger queues use more memory.
++- Add workers with `--workers N`.
++- Reduce the live packet rate entering the application with a BPF filter.
++- Offline PCAP processing applies backpressure and does not drop input frames silently.
+ 
+-Use the synthetic flow path to quickly validate scale-mode memory usage:
++### Reducing dashboard load
+ 
+-```bash
+-cargo run --release -- --synthetic-flows 1000000
+-```
++- Increase `sample_rate`; set it to `0` to disable live packet samples.
++- Reduce `top_n` or increase `tick_ms` to reduce dashboard work.
++- Reduce `payload_bytes` to limit packet hex dumps.
++- Use `?perf=1` for frontend diagnostics, while keeping in mind that this is separate from the offline runner's server-to-client frame probe.
+ 
+-This prints insertion time, estimated RSS, and a pass/fail check against the 500MB budget.
++### Reducing memory use
+ 
+-### CPU usage
++- Lower `max_flows` to cap the flow table. In pipeline mode, the configured budget is divided among worker shards.
++- Reduce `flow.timeout_secs` to expire flows sooner.
++- Lower `packet_buffer` to retain fewer dashboard packets.
++- For large flow-count runs, disable deep TCP analysis (`analysis.rtt = false`, `analysis.retrans = false`, `analysis.out_of_order = false`) to use scale-mode flow storage.
+ 
+-- Pipeline mode with auto-detected workers uses half the available CPU cores (clamped 1..8).
+-- Disable analysis features you don't need: `analysis.rtt = false`, `analysis.retrans = false`, `analysis.out_of_order = false`.
+-- Disable anomaly detection if not needed: `analysis.anomalies.enabled = false`.
++The developer-only `--synthetic-flows` option measures flow-table insertion without PCAP parsing. It is not used for the process RSS or replay-throughput results above.
+diff --git a/docs/streamlining-plan.md b/docs/streamlining-plan.md
+index 21c3b09..5602393 100644
+--- a/docs/streamlining-plan.md
++++ b/docs/streamlining-plan.md
+@@ -1,6 +1,6 @@
+ # NetScope streamlining plan
+ 
+-- **Status:** Phases 0, 1, 2, and 3 complete; Phase 4 has not started. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget. Phase 2 adds deterministic synthetic PCAP investigations and regression coverage. Phase 3 documents parser capability, hardens anomaly state, and defines inline-only anomaly semantics.
++- **Status:** Phases 0 through 4 complete. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget. Phase 2 adds deterministic synthetic PCAP investigations and regression coverage. Phase 3 documents parser capability, hardens anomaly state, and defines inline-only anomaly semantics. Phase 4 adds deterministic workload generation, raw offline measurements, and profile-guided removal of unused top-flow tracking.
+ - **Change type:** Focused cleanup with explicit behavior changes where current behavior is misleading.
+ - **Baseline inspected:** 2026-09-24, `main` at `6355f8c`.
+ - **Target:** A dependable Rust packet and flow investigation tool with reproducible correctness and performance evidence.
+@@ -451,24 +451,24 @@ Validation passed with `cargo fmt -- --check`, `python3 scripts/generate_example
+ 
+ ### 4.1 Build realistic deterministic workloads
+ 
+-- [ ] Generate fixed-seed traces for existing-flow small packets, high-cardinality new flows, mixed packet sizes and protocols, and an analysis-heavy case with TCP tracking and anomalies enabled.
+-- [ ] Record packet size distribution, protocol mix, flow cardinality, timestamp spacing, PCAP hash, and expected input count in each workload manifest.
+-- [ ] Provide at least one short smoke workload and larger measurement workloads (for example 100,000; 1,000,000; and 5,000,000 packets). Stream generation to disk; do not hold the entire trace in memory.
+-- [ ] Measure inline and pipeline modes with explicit worker counts. Measure the dashboard separately; keep per-packet terminal printing and file exports off unless that output path is the workload being studied.
++- [x] Generate fixed-seed traces for existing-flow small packets, high-cardinality new flows, mixed packet sizes and protocols, and an analysis-heavy case with TCP tracking and anomalies enabled.
++- [x] Record packet size distribution, protocol mix, flow cardinality, timestamp spacing, PCAP hash, and expected input count in each workload manifest.
++- [x] Provide at least one short smoke workload and larger measurement workloads (for example 100,000; 1,000,000; and 5,000,000 packets). Stream generation to disk; do not hold the entire trace in memory.
++- [x] Measure inline and pipeline modes with explicit worker counts. Measure the dashboard separately; keep per-packet terminal printing and file exports off unless that output path is the workload being studied.
+ 
+ ### 4.2 Implement the runner and result format
+ 
+-- [ ] Build with `cargo build --locked --release`; record the source commit and whether the worktree is dirty. Refuse a published run when the binary cannot be tied to the recorded source.
+-- [ ] Warm the workload consistently, then run at least five measured repetitions on the same host. Save per-run stdout, stderr, exit code, summary JSON, resource readings, command line, and config.
+-- [ ] Capture OS, CPU model and core count, memory, Rust version, libpcap version, relevant tool versions, power mode/governor if known, and notable background load. Record missing fields as unavailable.
+-- [ ] Report median and range or interquartile range. If results vary widely, repeat under a quieter setup rather than choosing the fastest run.
+-- [ ] Keep raw records in a documented JSON schema and generate the Markdown report from them. Results selected for publication must include raw data or an accessible artifact, not a manually typed table alone.
++- [x] Build with `cargo build --locked --release`; record the source commit and whether the worktree is dirty. Refuse a published run when the binary cannot be tied to the recorded source.
++- [x] Warm the workload consistently, then run at least five measured repetitions on the same host. Save per-run stdout, stderr, exit code, summary JSON, resource readings, command line, and config.
++- [x] Capture OS, CPU model and core count, memory, Rust version, libpcap version, relevant tool versions, power mode/governor if known, and notable background load. Record missing fields as unavailable.
++- [x] Report median and range or interquartile range. If results vary widely, repeat under a quieter setup rather than choosing the fastest run.
++- [x] Keep raw records in a documented JSON schema and generate the Markdown report from them. Results selected for publication must include raw data or an accessible artifact, not a manually typed table alone.
+ 
+ ### 4.3 Define the metrics without ambiguity
+ 
+ | Metric | Definition | Important limit |
+ | --- | --- | --- |
+-| Packet throughput | Worker-processed packets divided by measured wall seconds | State whether file open and shutdown are inside the timed interval. Use one definition across runs. |
++| Packet throughput | Pipeline worker-processed packets (inline: frames read) divided by measured wall seconds | State whether file open and shutdown are inside the timed interval. Use one definition across runs. |
+ | Bit throughput | Sum of original wire lengths × 8 divided by wall seconds | Label Mbps as decimal; do not substitute captured snaplen bytes without saying so. |
+ | CPU time | User CPU seconds + system CPU seconds for the NetScope process and its threads | A multi-core run can use more than one CPU-second per wall second. |
+ | CPU utilization | CPU time ÷ wall time × 100 | Values above 100% are expected with multiple active cores. |
+@@ -480,15 +480,21 @@ Resource measurement should live in the runner so it does not add hot-path work
+ 
+ ### 4.4 Optimize based on profiles
+ 
+-- [ ] Establish the baseline first. Profile the slowest meaningful workload, identify the actual hot function or allocation source, and change one cause at a time.
+-- [ ] Compare before and after on identical hashes, hardware, configs, and build settings. Keep Criterion for parser/flow/routing regression diagnosis; never use its isolated packet-per-second number as capture throughput.
+-- [ ] Investigate a repeated median regression greater than roughly 10% under controlled conditions, but do not make shared CI machines enforce an absolute throughput threshold.
+-- [ ] Check that performance changes preserve fixture results, bounded memory, and zero offline dispatch drops.
++- [x] Establish the baseline first. Profile the slowest meaningful workload, identify the actual hot function or allocation source, and change one cause at a time.
++- [x] Compare before and after on identical hashes, hardware, configs, and build settings. Keep Criterion for parser/flow/routing regression diagnosis; never use its isolated packet-per-second number as capture throughput.
++- [x] Investigate a repeated median regression greater than roughly 10% under controlled conditions, but do not make shared CI machines enforce an absolute throughput threshold.
++- [x] Check that performance changes preserve fixture results, bounded memory, and zero offline dispatch drops.
+ 
+ **Deliverables:** Benchmark generator, runner, manifests, raw-result schema, first reproducible report, and revised `docs/performance.md`.
+ 
+ **Exit gate:** Another machine can recreate each workload and report. Every published number identifies its commit, input hash, command, environment, and raw repetitions.
+ 
++**Completion record (2026-09-26):** Added deterministic streaming generators for steady-flow, high-cardinality, mixed-protocol/size, and analysis-heavy TCP/anomaly traces; saved 10,000-packet smoke PCAPs and manifests for all four; and exercised 100,000-packet mode/worker matrices, separate 1,000,000-packet dashboard runs, and a 5,000,000-packet profile. The release runner saves source and binary fingerprints, environment/resource readings, configs, per-run output and summaries, validation, aggregates, and JSON Schema v1. Darwin resource timing uses `/usr/bin/time -l`; a Linux `perf`/`/usr/bin/time` adapter is implemented but was not exercised on this macOS host. The dashboard probe measures server-to-local-WebSocket delivery, not browser rendering. `libpcap` version detection was unavailable on this host and is recorded that way.
++
++Before profiling, the 5,000,000-packet high-cardinality pipeline run sampled repeated hash-map iterator folding while per-worker top-flow candidates were collected, even with stats and dashboard disabled. Pipeline setup now sets heavy-hitter tracking to zero unless stats or web output consumes it. A follow-up sample no longer contains that iterator-fold path; hash-table growth for new tracked flows remains visible. Normalized final summaries matched for all 12 same-hash scenarios after excluding only elapsed time, source/summary paths, and the dynamically allocated dashboard port; offline inputs reconciled and pipeline runs reported zero dispatch drops. The identical 100,000-packet high-cardinality PCAP medians moved from 1.292M to 1.374M packets/s at two workers and 1.327M to 1.353M at four workers, but the measured ranges overlap, so this is not claimed as a reliable throughput gain. Both benchmark reports retain all runs, and the noisy scenarios are explicitly marked provisional.
++
++Reports and profile artifacts: [baseline report](benchmarks/offline-20260926-first/report.md), [optimized report](benchmarks/offline-20260926-after/report.md), [before profile](benchmarks/offline-20260926-first/profiling/baseline-high-cardinality-5m-pipeline-w4/profile.json), and [after profile](benchmarks/offline-20260926-after/profiling/high-cardinality-5m-pipeline-w4/profile.json).
++
+ ## Phase 5 — Measure live capture and packet loss
+ 
+ Live capture is a separate experiment because NIC, driver, kernel buffers, scheduling, and privileges affect its result.
+@@ -554,7 +560,7 @@ The legacy `docs/` set has 12 feature and reference pages with repeated setup, o
+ 
+ - [ ] Remove literal Markdown fences and duplicate patterns from `.gitignore`. Ignore generated benchmark output and temporary traces while allowing intentional tracked sample PCAPs.
+ - [ ] Replace stale or overlapping `scripts/perf/` entry points once the new runner and live runbook cover their workflows. Delete scripts that no longer have a tested purpose.
+-- [ ] Remove unsupported old benchmark numbers from `docs/performance.md`. Preserve a historical result only if its raw data, environment, and command can be recovered and labeled.
++- [x] Remove unsupported old benchmark numbers from `docs/performance.md`. Preserve a historical result only if its raw data, environment, and command can be recovered and labeled.
+ - [ ] Remove `--synthetic-flows` from the ordinary CLI after the benchmark harness provides its replacement. Remove `src/memory.rs` if its remaining code is no longer used.
+ - [ ] Audit unused dependencies, exports, config keys, and code paths with compiler and search evidence before removing them. Keep Chart.js licensing intact while the dashboard uses its vendored asset.
+ - [ ] Clean ignored local build artifacts after the dependency/build path is verified. Do not delete tracked sample data or uncommitted user work as part of disk cleanup.
+@@ -643,7 +649,7 @@ These decisions are deliberately scheduled after the relevant measurements or te
+ ### Evidence
+ 
+ - [ ] CPU, packet/bit throughput, peak RSS, and controlled live loss have raw results, hashes, commands, and environment records.
+-- [ ] Criterion results are labeled as isolated measurements, and the performance page has no unexplained speed claim.
++- [x] Criterion results are labeled as isolated measurements, and the performance page has no unexplained speed claim.
+ - [ ] The comparison with `tcpdump`, TShark/Wireshark, Zeek, and Suricata reflects each tool's actual role and tested command.
+ - [ ] A changed implementation is accepted only after its focused correctness check and before/after benchmark agree with the stated goal.
+ 
+diff --git a/src/main.rs b/src/main.rs
+index c20fc99..a7d3e27 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1401,6 +1401,16 @@ fn run_capture_pipeline(
+         _ => 65535,
+     };
+     let kernel_stats = Arc::new(pipeline::KernelPcapStats::new());
++    let stats_top_n = if config.stats.enabled {
++        config.stats.top_flows as usize
++    } else {
++        0
++    };
++    let web_top_n = if config.web.enabled {
++        config.web.top_n
++    } else {
++        0
++    };
+ 
+     let pipeline_cfg = pipeline::PipelineConfig {
+         num_workers: config.pipeline.workers,
+@@ -1411,7 +1421,7 @@ fn run_capture_pipeline(
+         analysis: config.analysis.clone(),
+         stats: config.stats.clone(),
+         web: config.web.clone(),
+-        heavy_hitter_top_n: config.web.top_n.max(config.stats.top_flows as usize),
++        heavy_hitter_top_n: stats_top_n.max(web_top_n),
+         alerts_jsonl: config.analysis.alerts_jsonl.clone(),
+         expired_flows_jsonl: config.output.expired_flows_jsonl.clone(),
+         expired_flows_csv: config.output.expired_flows_csv.clone(),
+diff --git a/src/pipeline/mod.rs b/src/pipeline/mod.rs
+index 28d773b..13b4010 100644
+--- a/src/pipeline/mod.rs
++++ b/src/pipeline/mod.rs
+@@ -305,8 +305,17 @@ pub fn spawn(
+     let web_event_tx = web_handle.map(|h| h.event_tx.clone());
+     let agg_handle = aggregator::AggregatorHandle::new(num_workers);
+     let agg_handle_clone = agg_handle.clone();
+-    let max_top_n = (config.stats.top_flows as usize).max(config.web.top_n);
+-    let web_top_n = config.web.top_n;
++    let stats_top_n = if config.stats.enabled {
++        config.stats.top_flows as usize
++    } else {
++        0
++    };
++    let web_top_n = if config.web.enabled {
++        config.web.top_n
++    } else {
++        0
++    };
++    let max_top_n = stats_top_n.max(web_top_n);
+     // Use a small deadline slightly above the configured tick to avoid
+     // gating merged frames on idle shards. Previously this was a 2x multiplier
+     // which caused merged frame cadence to be artificially low (e.g. ~26fps

@@ -1,0 +1,11 @@
+{
+  "binary_sha256": "73daa40f6fdd5563c2fb74a2163efd331062485ada8c814aeed0ce385384282f",
+  "output_directory": "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-checksummed",
+  "reproduction_command": "python3 scripts/perf/run_offline.py --output-dir docs/benchmarks/offline-20260926-checksummed --packets 100000 --repetitions 5 --warmups 1 --workers 2,4 --dashboard --dashboard-packets 1000000 --background-load-notes 'Checksummed workload and complete source snapshot verification run; routine desktop background load.'",
+  "results_schema": "scripts/perf/result.schema.json",
+  "runner": "scripts/perf/run_offline.py",
+  "source_commit": "f85891b6a61f611bac90535082f75d88838d27e5",
+  "source_dirty": true,
+  "source_tree_sha256": "60d7b6ce1113d8f8760b81ddd6f690e596bc8a57c122b02fe0e5d619becb2a1d",
+  "workload_generator": "scripts/perf/workloads.py"
+}

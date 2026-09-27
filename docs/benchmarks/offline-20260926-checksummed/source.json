@@ -1,0 +1,57 @@
+{
+  "commit": "f85891b6a61f611bac90535082f75d88838d27e5",
+  "dirty": true,
+  "fingerprint_method": "commit + binary diff from HEAD + SHA-256 of each untracked regular file",
+  "snapshot": {
+    "complete": true,
+    "patch_path": "source-snapshot/working-tree.patch",
+    "reconstruction_guide": "source-snapshot/README.md",
+    "untracked_root": "source-snapshot/untracked"
+  },
+  "source_tree_sha256": "60d7b6ce1113d8f8760b81ddd6f690e596bc8a57c122b02fe0e5d619becb2a1d",
+  "status_porcelain": [
+    " M docs/performance.md",
+    " M docs/streamlining-plan.md",
+    " M src/main.rs",
+    " M src/pipeline/mod.rs",
+    "?? scripts/perf/profile_offline.py",
+    "?? scripts/perf/repeat_scenarios.py",
+    "?? scripts/perf/result.schema.json",
+    "?? scripts/perf/run_offline.py",
+    "?? scripts/perf/test_workloads.py",
+    "?? scripts/perf/workloads.py"
+  ],
+  "tracked_diff_sha256": "aa506f0cb2bcea0da1be51c12341b941f45a20112626d85e3969b00102ce38f0",
+  "untracked_files": [
+    {
+      "bytes": 6977,
+      "path": "scripts/perf/profile_offline.py",
+      "sha256": "34809d1bf99cd900ff447f8851ff1673e6c5f141c80314123f00b83a38668b2f"
+    },
+    {
+      "bytes": 9592,
+      "path": "scripts/perf/repeat_scenarios.py",
+      "sha256": "6915505576b39b85507651bad54993ca95b1a3ffeb56d70f5671328e74c400a8"
+    },
+    {
+      "bytes": 7787,
+      "path": "scripts/perf/result.schema.json",
+      "sha256": "3c0a55e140e70ab4f2436af6958b5fc63ceedb1a695d59b1b0fd60814f3ac5da"
+    },
+    {
+      "bytes": 66695,
+      "path": "scripts/perf/run_offline.py",
+      "sha256": "d48e6fcb76359d48f95e3fb679eb6d9a121a9a4453ea9f4e09444386c34753fb"
+    },
+    {
+      "bytes": 1672,
+      "path": "scripts/perf/test_workloads.py",
+      "sha256": "401f103d364f7fb051659aabdce96d5a81352ae4e8d8735b1e0467409cb4870a"
+    },
+    {
+      "bytes": 12104,
+      "path": "scripts/perf/workloads.py",
+      "sha256": "81fb1da0af0c69dcdecd3e11de617f9bbf2346c47bd8b4f24fc133905b6ee11b"
+    }
+  ]
+}

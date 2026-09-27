@@ -1,0 +1,28 @@
+{
+  "captured_length_equals_wire_length": true,
+  "checksums": "valid IPv4, TCP, UDP, and ICMP Internet checksums",
+  "description": "Small TCP packets repeatedly update one established flow.",
+  "flow_cardinality": 1,
+  "flow_cardinality_definition": "Distinct IPv4 five-tuples for TCP and UDP packets; ICMP does not create tracked flows.",
+  "generator": "scripts/perf/workloads.py",
+  "link_type": "Ethernet (DLT_EN10MB, 1)",
+  "packet_count": 10000,
+  "packet_size_distribution_bytes": {
+    "54": 10000
+  },
+  "pcap_bytes": 700024,
+  "pcap_file": "steady-flow-10000.pcap",
+  "pcap_sha256": "0da0678c88c30ef278d889c2c0f7cdb89929f5251e72b7a4cd954cbb1994b27b",
+  "protocol_mix_packets": {
+    "tcp": 10000
+  },
+  "provenance": "Generated locally from fixed seeds; contains no captured user or network traffic.",
+  "schema_version": 2,
+  "seed": "0x4e45503c434f7755",
+  "synthetic": true,
+  "timestamp_end_unix_seconds": 1800000000.09999,
+  "timestamp_spacing_microseconds": 10,
+  "timestamp_start_unix_seconds": 1800000000,
+  "wire_bytes": 540000,
+  "workload": "steady-flow"
+}

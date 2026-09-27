@@ -1,0 +1,24 @@
+NetScope v0.1.0
+Reading packets from pcap: /var/folders/wl/fcppyd1s5zl2739rqdrlknrr0000gn/T/netscope-offline-bench-m4f44620/high-cardinality-100000.pcap
+Processing packets until EOF...
+Datalink: Ethernet
+
+
+==================================================
+Capture complete (status: success).
+  Packets captured:  100000
+  Input wire bytes:   5400000
+  Packets classified:  100000
+  Network headers:    100000
+  Transport headers:   100000
+  Packet parse errors: 0
+  Malformed transport: 0
+  Unsupported packets:  0
+  Malformed/unsupported total: 0
+  Flows created:      100000
+  Flows expired:      0
+  Flows evicted:      0
+  Alerts emitted:     0
+  Elapsed:            0.015s
+  Kernel/interface drops: unavailable/unavailable
+==================================================

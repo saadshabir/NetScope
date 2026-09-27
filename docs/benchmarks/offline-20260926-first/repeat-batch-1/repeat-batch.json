@@ -1,0 +1,315 @@
+{
+  "aggregates": [
+    {
+      "anomaly_detection_enabled": false,
+      "dashboard_enabled": false,
+      "dashboard_metrics": null,
+      "deterministic_summary_across_repetitions": true,
+      "metrics": {
+        "bit_throughput_mbps_decimal": {
+          "max": 1812.9496881113876,
+          "median": 1779.1029532285372,
+          "min": 1494.7368447276078,
+          "p25": 1516.5730364196954,
+          "p75": 1789.816377351829,
+          "spread_percent_of_median": 17.886139911482864
+        },
+        "cpu_seconds_per_million_packets": {
+          "max": 1.03,
+          "median": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p75": 1.02,
+          "spread_percent_of_median": 3.0000000000000027
+        },
+        "cpu_utilization_percent": {
+          "max": 419.6642796554138,
+          "median": 411.82938732142065,
+          "min": 356.38401621977687,
+          "p25": 358.07974471020583,
+          "p75": 414.30934660921963,
+          "spread_percent_of_median": 15.365650287177916
+        },
+        "packet_throughput_per_second": {
+          "max": 4196642.796554138,
+          "median": 4118293.8732142067,
+          "min": 3460038.9924250175,
+          "p25": 3510585.7324529984,
+          "p75": 4143093.4660921968,
+          "spread_percent_of_median": 17.886139911482882
+        },
+        "peak_rss_mib": {
+          "max": 658.15625,
+          "median": 588.375,
+          "min": 568.703125,
+          "p25": 582.21875,
+          "p75": 593.09375,
+          "spread_percent_of_median": 15.20342043764606
+        },
+        "total_cpu_seconds": {
+          "max": 1.03,
+          "median": 1.0,
+          "min": 1.0,
+          "p25": 1.0,
+          "p75": 1.02,
+          "spread_percent_of_median": 3.0000000000000027
+        }
+      },
+      "mode": "pipeline",
+      "packet_count": 1000000,
+      "pcap_sha256": "b708210cafae74738c42f0a08be2a966946a2610b47f3abdc2fc04072b603ae5",
+      "repetitions": 5,
+      "requested_workers": 4,
+      "run_ids": [
+        "high-cardinality-dashboard-control-pipeline-w4-n1000000-measured-07",
+        "high-cardinality-dashboard-control-pipeline-w4-n1000000-measured-08",
+        "high-cardinality-dashboard-control-pipeline-w4-n1000000-measured-09",
+        "high-cardinality-dashboard-control-pipeline-w4-n1000000-measured-10",
+        "high-cardinality-dashboard-control-pipeline-w4-n1000000-measured-11"
+      ],
+      "scenario_id": "high-cardinality-dashboard-control-pipeline-w4-n1000000",
+      "workload": "high-cardinality"
+    },
+    {
+      "anomaly_detection_enabled": false,
+      "dashboard_enabled": true,
+      "dashboard_metrics": {
+        "frame_interval_ms_p50_median": 32.95612499999834,
+        "frame_interval_ms_p95_median": 34.467541999999796,
+        "frame_sequence_gaps_total": 0,
+        "frames_per_run_median": 7,
+        "frames_per_second_median": 29.972388023169053,
+        "measurement_limit": "server-to-local-WebSocket-client delivery; does not measure browser rendering"
+      },
+      "deterministic_summary_across_repetitions": true,
+      "metrics": {
+        "bit_throughput_mbps_decimal": {
+          "max": 1920.159654874772,
+          "median": 1855.0084037462811,
+          "min": 1771.8297525898174,
+          "p25": 1790.6432696519423,
+          "p75": 1889.927060627509,
+          "spread_percent_of_median": 7.996184922148874
+        },
+        "cpu_seconds_per_million_packets": {
+          "max": 1.0899999999999999,
+          "median": 1.04,
+          "min": 1.02,
+          "p25": 1.02,
+          "p75": 1.08,
+          "spread_percent_of_median": 6.730769230769215
+        },
+        "cpu_utilization_percent": {
+          "max": 453.3710296232101,
+          "median": 447.0588959080789,
+          "min": 446.2327782037175,
+          "p25": 446.5760971981789,
+          "p75": 447.6608174129856,
+          "spread_percent_of_median": 1.5967138748001448
+        },
+        "packet_throughput_per_second": {
+          "max": 4444814.015913825,
+          "median": 4294000.934597873,
+          "min": 4101457.7606245773,
+          "p25": 4145007.5686387555,
+          "p75": 4374831.158859975,
+          "spread_percent_of_median": 7.996184922148883
+        },
+        "peak_rss_mib": {
+          "max": 598.671875,
+          "median": 578.765625,
+          "min": 557.8125,
+          "p25": 573.46875,
+          "p75": 592.0625,
+          "spread_percent_of_median": 7.0597446073270165
+        },
+        "total_cpu_seconds": {
+          "max": 1.0899999999999999,
+          "median": 1.04,
+          "min": 1.02,
+          "p25": 1.02,
+          "p75": 1.08,
+          "spread_percent_of_median": 6.730769230769215
+        }
+      },
+      "mode": "pipeline",
+      "packet_count": 1000000,
+      "pcap_sha256": "b708210cafae74738c42f0a08be2a966946a2610b47f3abdc2fc04072b603ae5",
+      "repetitions": 5,
+      "requested_workers": 4,
+      "run_ids": [
+        "high-cardinality-dashboard-websocket-pipeline-w4-n1000000-measured-07",
+        "high-cardinality-dashboard-websocket-pipeline-w4-n1000000-measured-08",
+        "high-cardinality-dashboard-websocket-pipeline-w4-n1000000-measured-09",
+        "high-cardinality-dashboard-websocket-pipeline-w4-n1000000-measured-10",
+        "high-cardinality-dashboard-websocket-pipeline-w4-n1000000-measured-11"
+      ],
+      "scenario_id": "high-cardinality-dashboard-websocket-pipeline-w4-n1000000",
+      "workload": "high-cardinality"
+    },
+    {
+      "anomaly_detection_enabled": false,
+      "dashboard_enabled": false,
+      "dashboard_metrics": null,
+      "deterministic_summary_across_repetitions": true,
+      "metrics": {
+        "bit_throughput_mbps_decimal": {
+          "max": 1206.5494520631619,
+          "median": 1075.716175474408,
+          "min": 1067.236518264383,
+          "p25": 1067.4617807293657,
+          "p75": 1160.597427197295,
+          "spread_percent_of_median": 12.950714786578315
+        },
+        "cpu_seconds_per_million_packets": {
+          "max": 0.09999999999999999,
+          "median": 0.09999999999999999,
+          "min": 0.09999999999999999,
+          "p25": 0.09999999999999999,
+          "p75": 0.09999999999999999,
+          "spread_percent_of_median": 0.0
+        },
+        "cpu_utilization_percent": {
+          "max": 27.929385464425042,
+          "median": 24.900837395240924,
+          "min": 24.704549033897756,
+          "p25": 24.70976344280939,
+          "p75": 26.865681185122565,
+          "spread_percent_of_median": 12.950714786578304
+        },
+        "packet_throughput_per_second": {
+          "max": 2792938.546442504,
+          "median": 2490083.7395240925,
+          "min": 2470454.9033897757,
+          "p25": 2470976.344280939,
+          "p75": 2686568.1185122565,
+          "spread_percent_of_median": 12.950714786578294
+        },
+        "peak_rss_mib": {
+          "max": 26.40625,
+          "median": 26.375,
+          "min": 26.375,
+          "p25": 26.375,
+          "p75": 26.375,
+          "spread_percent_of_median": 0.11848341232227488
+        },
+        "total_cpu_seconds": {
+          "max": 0.01,
+          "median": 0.01,
+          "min": 0.01,
+          "p25": 0.01,
+          "p75": 0.01,
+          "spread_percent_of_median": 0.0
+        }
+      },
+      "mode": "inline",
+      "packet_count": 100000,
+      "pcap_sha256": "dcf1a3efba2468cab0a019e575e6e20f8e388074f3f408e718f873e7500e6398",
+      "repetitions": 5,
+      "requested_workers": null,
+      "run_ids": [
+        "high-cardinality-inline-n100000-measured-07",
+        "high-cardinality-inline-n100000-measured-08",
+        "high-cardinality-inline-n100000-measured-09",
+        "high-cardinality-inline-n100000-measured-10",
+        "high-cardinality-inline-n100000-measured-11"
+      ],
+      "scenario_id": "high-cardinality-inline-n100000",
+      "workload": "high-cardinality"
+    },
+    {
+      "anomaly_detection_enabled": false,
+      "dashboard_enabled": false,
+      "dashboard_metrics": null,
+      "deterministic_summary_across_repetitions": true,
+      "metrics": {
+        "bit_throughput_mbps_decimal": {
+          "max": 1110.591007174418,
+          "median": 1094.0748074156065,
+          "min": 1070.5004061582597,
+          "p25": 1071.8627662341496,
+          "p75": 1100.7783190702269,
+          "spread_percent_of_median": 3.6643381919065785
+        },
+        "cpu_seconds_per_million_packets": {
+          "max": 0.5,
+          "median": 0.5,
+          "min": 0.39999999999999997,
+          "p25": 0.39999999999999997,
+          "p75": 0.5,
+          "spread_percent_of_median": 20.000000000000007
+        },
+        "cpu_utilization_percent": {
+          "max": 128.54062583037248,
+          "median": 124.05819053635993,
+          "min": 99.12040797761664,
+          "p25": 101.92391843242842,
+          "p75": 126.62902863606558,
+          "spread_percent_of_median": 23.71485326809852
+        },
+        "packet_throughput_per_second": {
+          "max": 2570812.5166074494,
+          "median": 2532580.5727213114,
+          "min": 2478010.199440416,
+          "p25": 2481163.810727198,
+          "p75": 2548097.9608107107,
+          "spread_percent_of_median": 3.664338191906581
+        },
+        "peak_rss_mib": {
+          "max": 138.90625,
+          "median": 138.90625,
+          "min": 138.890625,
+          "p25": 138.90625,
+          "p75": 138.90625,
+          "spread_percent_of_median": 0.01124859392575928
+        },
+        "total_cpu_seconds": {
+          "max": 0.05,
+          "median": 0.05,
+          "min": 0.04,
+          "p25": 0.04,
+          "p75": 0.05,
+          "spread_percent_of_median": 20.000000000000004
+        }
+      },
+      "mode": "pipeline",
+      "packet_count": 100000,
+      "pcap_sha256": "1230001c9eb3cc4aee3697e07933cf78c781660cce3e80003da86bb60abf74f2",
+      "repetitions": 5,
+      "requested_workers": 2,
+      "run_ids": [
+        "steady-flow-pipeline-w2-n100000-measured-07",
+        "steady-flow-pipeline-w2-n100000-measured-08",
+        "steady-flow-pipeline-w2-n100000-measured-09",
+        "steady-flow-pipeline-w2-n100000-measured-10",
+        "steady-flow-pipeline-w2-n100000-measured-11"
+      ],
+      "scenario_id": "steady-flow-pipeline-w2-n100000",
+      "workload": "steady-flow"
+    }
+  ],
+  "background_load_notes": "Second batch after the first suite completed; retained the same release binary and inputs.",
+  "binary_sha256": "4f57e8b18a0eb99b0e395b12bb8a819ccd947244986bdae2ef4080de02bdd870",
+  "captured_at_utc": "2026-09-26T21:08:15Z",
+  "repetitions": 5,
+  "scenario_ids": [
+    "high-cardinality-inline-n100000",
+    "steady-flow-pipeline-w2-n100000",
+    "high-cardinality-dashboard-control-pipeline-w4-n1000000",
+    "high-cardinality-dashboard-websocket-pipeline-w4-n1000000"
+  ],
+  "source_commit": "f85891b6a61f611bac90535082f75d88838d27e5",
+  "source_tree_sha256": "e9b97be473c65a8174fe55c5504df95b4351b8666b9646caa57c5dc476f58c4d",
+  "started_at_utc": "2026-09-26T21:08:07Z",
+  "system_load_average_end": [
+    3.02685546875,
+    2.8330078125,
+    2.61865234375
+  ],
+  "system_load_average_start": [
+    2.7685546875,
+    2.77978515625,
+    2.59912109375
+  ],
+  "warmups": 1
+}

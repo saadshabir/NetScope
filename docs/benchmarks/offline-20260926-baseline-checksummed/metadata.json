@@ -1,0 +1,11 @@
+{
+  "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
+  "output_directory": "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed",
+  "reproduction_command": "python3 scripts/perf/run_offline.py --output-dir /Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed --packets 100000 --repetitions 5 --warmups 1 --workers 2,4 --dashboard --dashboard-packets 1000000 --background-load-notes 'Pre-optimization commit on the same Apple M4 host, with the same checksummed generator and runner; routine desktop background load.'",
+  "results_schema": "scripts/perf/result.schema.json",
+  "runner": "scripts/perf/run_offline.py",
+  "source_commit": "f85891b6a61f611bac90535082f75d88838d27e5",
+  "source_dirty": true,
+  "source_tree_sha256": "f1f7310577a1e90aa36e5815f3541eb64e2df6972f6ec5e762eb2922fe9b686c",
+  "workload_generator": "scripts/perf/workloads.py"
+}

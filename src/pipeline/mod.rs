@@ -305,8 +305,17 @@ pub fn spawn(
     let web_event_tx = web_handle.map(|h| h.event_tx.clone());
     let agg_handle = aggregator::AggregatorHandle::new(num_workers);
     let agg_handle_clone = agg_handle.clone();
-    let max_top_n = (config.stats.top_flows as usize).max(config.web.top_n);
-    let web_top_n = config.web.top_n;
+    let stats_top_n = if config.stats.enabled {
+        config.stats.top_flows as usize
+    } else {
+        0
+    };
+    let web_top_n = if config.web.enabled {
+        config.web.top_n
+    } else {
+        0
+    };
+    let max_top_n = stats_top_n.max(web_top_n);
     // Use a small deadline slightly above the configured tick to avoid
     // gating merged frames on idle shards. Previously this was a 2x multiplier
     // which caused merged frame cadence to be artificially low (e.g. ~26fps
