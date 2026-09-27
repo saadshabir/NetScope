@@ -1,0 +1,32 @@
+{
+  "captured_length_equals_wire_length": true,
+  "description": "Deterministic TCP, UDP, and ICMP traffic with mixed frame sizes.",
+  "flow_cardinality": 41814,
+  "flow_cardinality_definition": "Distinct IPv4 five-tuples for TCP and UDP packets; ICMP does not create tracked flows.",
+  "generator": "scripts/perf/workloads.py",
+  "link_type": "Ethernet (DLT_EN10MB, 1)",
+  "packet_count": 100000,
+  "packet_size_distribution_bytes": {
+    "128": 29988,
+    "1514": 10112,
+    "512": 19988,
+    "54": 39912
+  },
+  "pcap_bytes": 33137160,
+  "pcap_file": "mixed-100000.pcap",
+  "pcap_sha256": "f154850da4cdfc9c7a98ca2006daf009fe7781df2bba968e3b3b127849b9dde5",
+  "protocol_mix_packets": {
+    "icmp": 5021,
+    "tcp": 70103,
+    "udp": 24876
+  },
+  "provenance": "Generated locally from fixed seeds; contains no captured user or network traffic.",
+  "schema_version": 1,
+  "seed": "0x4e455644434ed6e5",
+  "synthetic": true,
+  "timestamp_end_unix_seconds": 1800000000.99999,
+  "timestamp_spacing_microseconds": 10,
+  "timestamp_start_unix_seconds": 1800000000,
+  "wire_bytes": 31537136,
+  "workload": "mixed"
+}

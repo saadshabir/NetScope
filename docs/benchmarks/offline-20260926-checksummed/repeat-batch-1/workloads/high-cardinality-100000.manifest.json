@@ -1,0 +1,28 @@
+{
+  "captured_length_equals_wire_length": true,
+  "checksums": "valid IPv4, TCP, UDP, and ICMP Internet checksums",
+  "description": "Small TCP SYN packets create distinct flows.",
+  "flow_cardinality": 100000,
+  "flow_cardinality_definition": "Distinct IPv4 five-tuples for TCP and UDP packets; ICMP does not create tracked flows.",
+  "generator": "scripts/perf/workloads.py",
+  "link_type": "Ethernet (DLT_EN10MB, 1)",
+  "packet_count": 100000,
+  "packet_size_distribution_bytes": {
+    "54": 100000
+  },
+  "pcap_bytes": 7000024,
+  "pcap_file": "high-cardinality-100000.pcap",
+  "pcap_sha256": "cd4e4a3c739dd34aa13da7a213bc35226e72056ca73c714f55898d8e4c87b0ed",
+  "protocol_mix_packets": {
+    "tcp": 100000
+  },
+  "provenance": "Generated locally from fixed seeds; contains no captured user or network traffic.",
+  "schema_version": 2,
+  "seed": "0x4e455232434ed6e5",
+  "synthetic": true,
+  "timestamp_end_unix_seconds": 1800000000.099999,
+  "timestamp_spacing_microseconds": 1,
+  "timestamp_start_unix_seconds": 1800000000,
+  "wire_bytes": 5400000,
+  "workload": "high-cardinality"
+}

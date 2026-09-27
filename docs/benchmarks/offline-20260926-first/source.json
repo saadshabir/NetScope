@@ -1,0 +1,29 @@
+{
+  "commit": "f85891b6a61f611bac90535082f75d88838d27e5",
+  "dirty": true,
+  "fingerprint_method": "commit + binary diff from HEAD + SHA-256 of each untracked regular file",
+  "source_tree_sha256": "e9b97be473c65a8174fe55c5504df95b4351b8666b9646caa57c5dc476f58c4d",
+  "status_porcelain": [
+    "?? scripts/perf/result.schema.json",
+    "?? scripts/perf/run_offline.py",
+    "?? scripts/perf/workloads.py"
+  ],
+  "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "untracked_files": [
+    {
+      "bytes": 7275,
+      "path": "scripts/perf/result.schema.json",
+      "sha256": "93a7ed5ec38a4659740b266c6324b0d9c01b5f802e36154a5e55235a39e02432"
+    },
+    {
+      "bytes": 58999,
+      "path": "scripts/perf/run_offline.py",
+      "sha256": "b47246687da76176cd2b9c6ba0214b0221231a275383f14c6fe6bfd67f631282"
+    },
+    {
+      "bytes": 10792,
+      "path": "scripts/perf/workloads.py",
+      "sha256": "cfaa2d2e1177b44a47ebf333e736180a37af629d9dedb25c318d0ddb71d2e7c6"
+    }
+  ]
+}

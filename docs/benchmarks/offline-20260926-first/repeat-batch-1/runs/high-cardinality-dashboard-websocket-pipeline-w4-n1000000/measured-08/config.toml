@@ -1,0 +1,36 @@
+[flow]
+timeout_secs = 0.0
+max_flows = 0
+
+[stats]
+enabled = false
+interval_ms = 1000
+top_flows = 0
+
+[analysis]
+rtt = false
+retrans = false
+out_of_order = false
+
+[analysis.anomalies]
+enabled = false
+
+[analysis.anomalies.syn_flood]
+enabled = true
+window_secs = 5.0
+syn_threshold = 200
+unique_src_threshold = 50
+cooldown_secs = 10.0
+
+[analysis.anomalies.port_scan]
+enabled = false
+
+[web]
+enabled = true
+bind = "127.0.0.1"
+port = 51057
+tick_ms = 33
+top_n = 10
+packet_buffer = 256
+sample_rate = 1000
+payload_bytes = 64

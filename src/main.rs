@@ -1401,6 +1401,16 @@ fn run_capture_pipeline(
         _ => 65535,
     };
     let kernel_stats = Arc::new(pipeline::KernelPcapStats::new());
+    let stats_top_n = if config.stats.enabled {
+        config.stats.top_flows as usize
+    } else {
+        0
+    };
+    let web_top_n = if config.web.enabled {
+        config.web.top_n
+    } else {
+        0
+    };
 
     let pipeline_cfg = pipeline::PipelineConfig {
         num_workers: config.pipeline.workers,
@@ -1411,7 +1421,7 @@ fn run_capture_pipeline(
         analysis: config.analysis.clone(),
         stats: config.stats.clone(),
         web: config.web.clone(),
-        heavy_hitter_top_n: config.web.top_n.max(config.stats.top_flows as usize),
+        heavy_hitter_top_n: stats_top_n.max(web_top_n),
         alerts_jsonl: config.analysis.alerts_jsonl.clone(),
         expired_flows_jsonl: config.output.expired_flows_jsonl.clone(),
         expired_flows_csv: config.output.expired_flows_csv.clone(),
