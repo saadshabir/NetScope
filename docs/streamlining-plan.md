@@ -1,6 +1,6 @@
 # NetScope streamlining plan
 
-- **Status:** Phases 0 through 4 complete. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget. Phase 2 adds deterministic synthetic PCAP investigations and regression coverage. Phase 3 documents parser capability, hardens anomaly state, and defines inline-only anomaly semantics. Phase 4 adds checksummed deterministic workloads, source snapshots, raw offline measurements, and profile-guided removal of unused top-flow tracking.
+- **Status:** Phases 0 through 4 and Phase 6 complete. Phase 1 adds versioned run accounting, lossless offline pipeline dispatch, partial-parse classification, and a pipeline-wide flow budget. Phase 2 adds deterministic synthetic PCAP investigations and regression coverage. Phase 3 documents parser capability, hardens anomaly state, and defines inline-only anomaly semantics. Phase 4 adds checksummed deterministic workloads, source snapshots, raw offline measurements, and profile-guided removal of unused top-flow tracking. Phase 5's runner and runbook are complete, but its Linux live-loss measurement and exit gate remain pending.
 - **Change type:** Focused cleanup with explicit behavior changes where current behavior is misleading.
 - **Baseline inspected:** 2026-09-24, `main` at `6355f8c`.
 - **Target:** A dependable Rust packet and flow investigation tool with reproducible correctness and performance evidence.
@@ -526,16 +526,18 @@ The comparison has two parts: a capability table and optional measured workloads
 
 ### Steps
 
-- [ ] Compare NetScope with `tcpdump` for capture/filter/read/write workflows, TShark/Wireshark for broad decode and statistics, Zeek for connection and protocol logs, and Suricata for IDS/IPS and event output. Verify each row against the tools' current manuals.
-- [ ] Describe NetScope's actual strengths: focused Rust implementation, flow tracking, simple offline example, optional live dashboard, and documented resource behavior once measured.
-- [ ] Describe its limits: narrower protocol coverage, heuristic rather than signature detection, packet-level TLS SNI, no general TCP stream reassembly, and supported PCAP/link types only.
-- [ ] Give exact commands for all tools against the same small sample PCAP. Compare observable outputs and setup effort, not just feature checkmarks.
-- [ ] If timing tools, choose matched tasks and publish all flags, output destinations, versions, input hashes, and resource measurements. Explain where tasks still differ. Avoid a headline ranking from unlike workloads.
-- [ ] Link primary documentation: [tcpdump manual](https://manpages.debian.org/trixie/tcpdump/tcpdump.8.en.html), [TShark manual](https://www.wireshark.org/docs/man-pages/tshark), [Zeek quick start](https://docs.zeek.org/en/master/quickstart.html), and [Suricata overview](https://docs.suricata.io/en/latest/what-is-suricata.html).
+- [x] Compare NetScope with `tcpdump` for capture/filter/read/write workflows, TShark/Wireshark for broad decode and statistics, Zeek for connection and protocol logs, and Suricata for IDS/IPS and event output. Verify each row against the tools' current manuals.
+- [x] Describe NetScope's actual strengths: focused Rust implementation, flow tracking, simple offline example, optional live dashboard, and documented resource behavior once measured.
+- [x] Describe its limits: narrower protocol coverage, heuristic rather than signature detection, packet-level TLS SNI, no general TCP stream reassembly, and supported PCAP/link types only.
+- [x] Give exact commands for all tools against the same small sample PCAP. Compare observable outputs and setup effort, not just feature checkmarks.
+- [x] Keep the comparison qualitative. No timing tools were selected because the sample is too small and unlike workloads would not support a meaningful ranking. If a later timing comparison is added, choose matched tasks and publish all flags, output destinations, versions, input hashes, and resource measurements; explain where tasks still differ.
+- [x] Link primary documentation: [tcpdump manual](https://manpages.debian.org/trixie/tcpdump/tcpdump.8.en.html), [TShark manual](https://www.wireshark.org/docs/man-pages/tshark), [Zeek quick start](https://docs.zeek.org/en/master/quickstart.html), and [Suricata overview](https://docs.suricata.io/en/latest/what-is-suricata.html).
 
 **Deliverables:** `docs/comparison.md`, a capability matrix, sample commands, and any clearly qualified measurements.
 
 **Exit gate:** A reader can select the appropriate tool for packet viewing, protocol investigation, network logs, or intrusion detection without being told that NetScope replaces broader tools.
+
+**Completion record (2026-09-27):** Added [`docs/comparison.md`](comparison.md) with the capability matrix, exact commands against the checked-in eight-packet PCAP, expected outputs, setup requirements, NetScope boundaries, and links to official manuals checked on 2026-09-27. The walkthrough was run with the workspace NetScope binary and `tcpdump 4.99.1` / libpcap `1.10.1`: both processed all eight frames, and the focused tcpdump BPF expression selected all eight. TShark, Wireshark, Zeek, and Suricata were unavailable locally; their command and output descriptions are manual-derived and labeled as unexecuted. No timing comparison was published because the sample is too small and the Phase 4 reports do not measure equivalent work across tools. The Phase 5 live-rate bracket remains pending as recorded in its own exit gate.
 
 ## Phase 7 — Simplify the repository and close the release gate
 
