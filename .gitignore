@@ -1,29 +1,16 @@
 # Rust build output
 /target/
 
-# Local benchmark runs and replay captures
-/tmp/perf/
+# Local benchmark and generated trace output. Checked-in examples/pcaps remain tracked.
 /tmp/bench/
-/tmp/perf-trace.pcap
+/tmp/perf/
+/tmp/smoke/
+/tmp/*.pcap
 
-# Python caches
-**/__pycache__/
-
-# Local credentials and environment overrides
+# Local secrets and platform metadata
 .env
 .env.*
-!.env.example
-
-# Logs, temporary files, and editor state
-*.log
-*.tmp
-*.swp
-*.swo
 .DS_Store
-.vscode/
-.idea/
 
-# Coverage output
-/coverage/
-/htmlcov/
-/.coverage
+# Python caches from fixture and benchmark scripts
+__pycache__/

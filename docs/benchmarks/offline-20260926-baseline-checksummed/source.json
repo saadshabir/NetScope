@@ -3,10 +3,12 @@
   "dirty": true,
   "fingerprint_method": "commit + binary diff from HEAD + SHA-256 of each untracked regular file",
   "snapshot": {
-    "complete": true,
-    "patch_path": "source-snapshot/working-tree.patch",
+    "complete": false,
+    "application_complete": true,
+    "patch_path": "source-snapshot/application.patch",
+    "untracked_root": "source-snapshot/untracked",
     "reconstruction_guide": "source-snapshot/README.md",
-    "untracked_root": "source-snapshot/untracked"
+    "published_manifest": "source-snapshot/published-manifest.json"
   },
   "source_tree_sha256": "f1f7310577a1e90aa36e5815f3541eb64e2df6972f6ec5e762eb2922fe9b686c",
   "status_porcelain": [
@@ -49,5 +51,6 @@
       "path": "scripts/perf/workloads.py",
       "sha256": "81fb1da0af0c69dcdecd3e11de617f9bbf2346c47bd8b4f24fc133905b6ee11b"
     }
-  ]
+  ],
+  "fingerprint_scope": "original measured worktree before publication edits"
 }

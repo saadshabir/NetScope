@@ -1,0 +1,34 @@
+[capture]
+timeout_ms = 1
+buffer_size_mb = 8
+immediate_mode = true
+
+[output]
+quiet = true
+hex_dump = false
+
+[stats]
+enabled = false
+interval_ms = 1000
+top_flows = 0
+
+[analysis]
+rtt = true
+retrans = true
+out_of_order = true
+
+[analysis.anomalies]
+enabled = false
+
+[web]
+enabled = true
+tick_ms = 33
+top_n = 10
+packet_buffer = 2000
+sample_rate = 0
+payload_bytes = 64
+
+[pipeline]
+enabled = true
+workers = 0
+channel_capacity = 8192

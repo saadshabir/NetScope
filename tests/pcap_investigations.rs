@@ -15,7 +15,7 @@ impl TempRunDir {
             .unwrap_or_default()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "netscope-phase2-{label}-{}-{unique}",
+            "netscope-investigation-{label}-{}-{unique}",
             std::process::id()
         ));
         std::fs::create_dir(&path).expect("temporary run directory should be created");

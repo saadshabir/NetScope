@@ -40,7 +40,7 @@ def main() -> int:
     if args.workers < 1:
         parser.error("workers must be a positive integer")
     if args.workload == "analysis-heavy" and args.mode == "pipeline":
-        parser.error("Phase 3 intentionally rejects pipeline runs with anomaly detection enabled")
+        parser.error("pipeline mode does not support enabled anomaly detection")
 
     output_root = (ROOT / args.output_dir).resolve() if not args.output_dir.is_absolute() else args.output_dir.resolve()
     output_root.mkdir(parents=True, exist_ok=False)

@@ -1,301 +1,93 @@
 # Reference
 
-NetScope supports TOML configuration files for persistent settings. Load a config file with `--config`:
+Use `netscope --help` for the complete option list generated from the CLI. The checked-in [`netscope.example.toml`](../netscope.example.toml) covers the configuration sections and their current values; `src/config.rs` defines the compiled defaults. This page explains precedence and output contracts without copying every flag or default into another table.
 
-```bash
-sudo netscope --config netscope.toml
-```
+## Configuration and precedence
 
-The configuration tables below are the source of truth for compiled TOML defaults. CLI flags override explicit TOML values, and TOML overrides compiled defaults. The complete CLI flag list and compiled flag defaults live in the [CLI appendix](streamlining-plan.md#cli-reference); `netscope --help` shows the options supported by the built binary.
+Load TOML with `--config <PATH>`. Explicit CLI options override values from the file, and file values override compiled defaults. Boolean options have explicit `--no-*` forms where needed, so a CLI option can turn off a config setting.
 
-A full template is provided in [`netscope.example.toml`](../netscope.example.toml) at the repository root.
+| Section | Settings covered |
+| --- | --- |
+| `[capture]`, `[run]` | Interface or PCAP input, BPF filter, capture controls, packet limit |
+| `[output]` | PCAP writing and rotation, flow exports, run summary, expired-flow sinks, terminal output |
+| `[flow]`, `[stats]` | Flow timeout and budget, periodic statistics, top-flow count |
+| `[analysis]` | TCP RTT/retransmission/order tracking and alert output |
+| `[analysis.anomalies.*]` | SYN-flood and port-scan windows, thresholds, and cooldowns |
+| `[web]`, `[web.tls]`, `[web.auth]` | Local dashboard, sampling, HTTPS, and HTTP Basic auth |
+| `[pipeline]` | Worker count and bounded per-worker queue capacity |
 
-## Precedence Rules
+The example config includes all sections and output paths. Empty path strings disable file outputs. `capture.interface` and `capture.read_pcap` are mutually exclusive. PCAP rotation requires `write_pcap` and both positive rotation settings; it writes numbered segments and uses the configured path as a base name.
 
-1. **CLI flags** always override config file values when explicitly provided.
-2. **Config file values** override compiled defaults.
-3. **Compiled defaults** apply when neither CLI nor config file specifies a value.
+Settings available only through TOML include `capture.buffer_size_mb`, `capture.immediate_mode`, the TCP-analysis switches under `[analysis]`, anomaly thresholds, dashboard sampling/tick settings, and `pipeline.channel_capacity`. CLI and TOML forms are both listed in `--help` and the example config respectively.
 
-For boolean options, `--flag` and `--no-flag` pairs let you override in either direction:
+## Output behavior
 
-```bash
-# Config says quiet = true, CLI overrides it back to false:
-sudo netscope --config my.toml --no-quiet
-```
+| Output | Contract |
+| --- | --- |
+| `--export-json` | On exit, writes a JSON array containing the final TCP/UDP flow snapshots, sorted by total bytes. |
+| `--export-csv` | On exit, writes the same flow fields as one row per flow with a header. |
+| `--expired-flows-jsonl` / `--expired-flows-csv` | Streams records when flows expire or are evicted. |
+| `--alerts-jsonl` | Writes versioned alert objects as JSON Lines. Anomaly detection is inline-only. |
+| `--write-pcap` | Writes captured input frames. In pipeline mode, writing occurs before worker dispatch, so the PCAP may include frames later counted as dispatch drops. |
+| `--summary-json` | Writes schema-versioned final accounting after worker shutdown and output flushes. |
 
-## CLI and config-only settings
+Flow JSON is an array of records with `protocol`, `endpoint_a`/`endpoint_b` (`ip` and `port`), `first_seen`, `last_seen`, `duration_secs`, directional and total packet/byte counts, `avg_bps`, and TCP tracking fields (`tcp_state`, `client`, retransmission/order counts, RTT samples). CSV uses the same data as one row per flow. Flow endpoint order is canonical; the A-to-B and B-to-A counts preserve direction. TCP state and tracking values are inferred from observed packets, not stream reassembly. Scale mode keeps RTT values null and retransmission/order counters at zero because those analyses are disabled. CSV is emitted as plain comma-separated numeric, enum, and IP fields without quoting.
 
-The CLI exposes common capture, output, and mode toggles, but some tuning knobs are only available in TOML. Common config-only examples include:
+Alert JSONL schema version 1 includes `ts`, `kind`, optional source/target addresses and target port, `window_secs`, configured `thresholds`, observed counts, and a description. The threshold and observed objects use `syn_count`, `unique_sources`, `unique_ports`, and `unique_hosts`; fields that do not apply to that alert kind are null.
 
-- `capture.buffer_size_mb` and `capture.immediate_mode`
-- `analysis.rtt`, `analysis.retrans`, and `analysis.out_of_order`
-- `web.tick_ms`, `web.top_n`, `web.packet_buffer`, `web.sample_rate`, and `web.payload_bytes`
-- `pipeline.channel_capacity`
-- Inline `web.auth.password` (CLI supports a password file instead)
+Summary JSON schema version 1 includes application version, run status and error, source and mode, effective configuration, elapsed wall seconds, input frame and wire-byte totals, parser-layer counts, flow lifecycle events, alert count, pipeline reconciliation, separate drop counters, and output errors. Inline runs set pipeline-only counts to `null`. Offline input and unavailable live counters use `null`, never zero. A partial decode may count as a parsed packet and also as malformed or unsupported. Sink, worker, or capture failures make the run unsuccessful and are reflected in `output_errors` or `run_error`.
 
-Use the [CLI appendix](streamlining-plan.md#cli-reference) for all flags and this page for the full config schema.
+### Run-summary fields
 
-## Path Fields
+| Fields | Meaning |
+| --- | --- |
+| `schema_version`, `application_version` | Output schema and producing application version. |
+| `status`, `run_error` | `success`, `failed`, or `interrupted`, and an optional failure description. |
+| `mode`, `source`, `worker_count`, `effective_config` | Inline or pipeline execution, `pcap:<path>` or `interface:<name>`, worker count, and settings without credentials. |
+| `elapsed_wall_seconds`, `frames_read`, `input_wire_bytes` | Run duration, input frames read, and their original wire lengths. |
+| `packets_parsed`, `packets_with_network_header`, `packets_with_transport_header` | Frames returned by the parser and those with recognized network or transport headers. |
+| `packet_parse_errors`, `transport_parse_errors`, `unsupported_packets` | Link/network parse failures, malformed supported transport headers, and unsupported payloads or fragments. |
+| `malformed_or_unsupported_packets` | Compatibility aggregate counting each affected frame once. |
+| `dispatched_frames`, `dispatch_drops`, `worker_processed_frames`, `worker_failures` | Pipeline dispatch and worker accounting; `null` in inline mode. |
+| `flows_created`, `flows_expired`, `flows_evicted`, `alerts_emitted` | Observed flow lifecycle and alert events. |
+| `kernel_drops`, `interface_drops` | Separate libpcap drop counters; `null` for offline input or when unavailable. |
+| `output_errors` | Output open, write, flush, and export failures. |
 
-In TOML, path fields (`capture.read_pcap`, `write_pcap`, `export_json`, `export_csv`, `summary_json`, `expired_flows_jsonl`, `expired_flows_csv`, `alerts_jsonl`, `web.tls.cert_path`, `web.tls.key_path`, `web.auth.password_file`) accept file paths. Setting an optional output or credential path to an empty string (`""`) disables it, equivalent to omitting that key.
+After workers drain, pipeline accounting reconciles `frames_read = dispatched_frames + dispatch_drops` and `dispatched_frames = worker_processed_frames + worker_failures`. A partial decode can increment `packets_parsed` and a malformed or unsupported counter. Offline queue pressure slows reading instead of causing dispatch drops.
+
+## Remote dashboard
+
+Save this as `dashboard.toml`, using existing PEM certificate/key files and a password file readable by NetScope:
 
 ```toml
-[output]
-write_pcap = ""     # disabled
-export_json = ""    # disabled
-expired_flows_jsonl = "" # disabled
-expired_flows_csv = "" # disabled
+[web]
+enabled = true
+bind = "0.0.0.0"
+port = 8443
+
+[web.tls]
+enabled = true
+cert_path = "/etc/netscope/dashboard.crt"
+key_path = "/etc/netscope/dashboard.key"
+
+[web.auth]
+enabled = true
+username = "operator"
+password_file = "/etc/netscope/dashboard.pass"
 ```
 
-## Config Reference
+Run `sudo ./target/release/netscope --config dashboard.toml --quiet` and open `https://<host>:8443`. The password file contains only the password; use either `password` or `password_file`, not both. Basic auth protects all endpoints, including `/api/health`, `/metrics`, and `/ws`. Without TLS, Basic auth credentials travel over cleartext HTTP. Self-signed certificates work, but browsers require you to trust them.
 
-### `[capture]`
-
-| Key              | Type   | Default | Description                                                                                              |
-| ---------------- | ------ | ------- | -------------------------------------------------------------------------------------------------------- |
-| `interface`      | string | (auto)  | Network interface name (e.g., `"en0"`). Omit for system default.                                         |
-| `read_pcap`      | path   | (none)  | Read packets from an offline pcap file instead of a live interface. Mutually exclusive with `interface`. |
-| `promiscuous`    | bool   | `true`  | Capture in promiscuous mode.                                                                             |
-| `snaplen`        | int    | `65535` | Maximum bytes captured per packet.                                                                       |
-| `timeout_ms`     | int    | `100`   | Capture read timeout in milliseconds.                                                                    |
-| `buffer_size_mb` | int    | (none)  | libpcap capture buffer size in megabytes. Omit the key (or set to 0) to use the libpcap default.         |
-| `immediate_mode` | bool   | `false` | Enable libpcap immediate mode (if supported by your libpcap build).                                      |
-| `filter`         | string | (none)  | BPF filter expression.                                                                                   |
-
-Note: `capture.interface` and `capture.read_pcap` are mutually exclusive. If both are set, NetScope exits with a configuration error. If neither is set, NetScope captures from the system default interface. When `capture.read_pcap` is set, live-capture-only settings like `promiscuous`, `timeout_ms`, `buffer_size_mb`, and `immediate_mode` have no effect.
-
-### `[run]`
-
-| Key     | Type | Default | Description                                                             |
-| ------- | ---- | ------- | ----------------------------------------------------------------------- |
-| `count` | int  | `0`     | Maximum packets to process. 0 = unlimited (live: Ctrl-C; offline: EOF). |
-
-### `[output]`
-
-| Key                    | Type | Default | Description                                                                                          |
-| ---------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `write_pcap`           | path | (none)  | Write captured packets to a pcap file.                                                               |
-| `write_pcap_rotate_mb` | int  | `0`     | Rotate pcap output when the active segment reaches this many MiB. `0` disables rotation.             |
-| `write_pcap_max_files` | int  | `0`     | Keep only the newest `N` rotated pcap files (delete oldest). Must be `> 0` when rotation is enabled. |
-| `export_json`          | path | (none)  | Export flow table to JSON on exit.                                                                   |
-| `export_csv`           | path | (none)  | Export flow table to CSV on exit.                                                                    |
-| `summary_json`         | path | (none)  | Write versioned final run accounting as JSON after workers and outputs finish.                       |
-| `expired_flows_jsonl`  | path | (none)  | Write expired or evicted flows as JSON lines during capture (inline and pipeline modes).             |
-| `expired_flows_csv`    | path | (none)  | Write expired or evicted flows as streaming CSV during capture (inline and pipeline modes).          |
-| `hex_dump`             | bool | `false` | Show hex dump of each packet.                                                                        |
-| `quiet`                | bool | `false` | Suppress per-packet terminal output.                                                                 |
-
-When rotation is enabled (`write_pcap_rotate_mb > 0` and `write_pcap_max_files > 0`), NetScope treats `write_pcap` as a base template and writes numbered segments such as `capture.000001.pcap`, `capture.000002.pcap`, and so on (the unsuffixed `capture.pcap` file is not created).
-
-If either `write_pcap_rotate_mb` or `write_pcap_max_files` is set without the other, NetScope exits with a configuration error.
-
-### `[flow]`
-
-| Key            | Type  | Default  | Description                                                                                                                                           |
-| -------------- | ----- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `timeout_secs` | float | `60.0`   | Flow inactivity timeout in seconds. 0 = never expire.                                                                                                 |
-| `max_flows`    | int   | `100000` | Maximum tracked flows. In pipeline mode this is split into per-worker quotas; 0 = unlimited. Used to pre-size each flow table. |
-
-### `[stats]`
-
-| Key           | Type | Default | Description                                 |
-| ------------- | ---- | ------- | ------------------------------------------- |
-| `enabled`     | bool | `false` | Enable periodic throughput stats on stdout. |
-| `interval_ms` | int  | `1000`  | Stats reporting interval in milliseconds.   |
-| `top_flows`   | int  | `0`     | Number of top flows to show per stats tick. |
-
-### `[analysis]`
-
-| Key            | Type | Default | Description                                                                  |
-| -------------- | ---- | ------- | ---------------------------------------------------------------------------- |
-| `rtt`          | bool | `true`  | Compute TCP RTT estimates.                                                   |
-| `retrans`      | bool | `true`  | Detect TCP retransmissions.                                                  |
-| `out_of_order` | bool | `true`  | Detect out-of-order TCP segments.                                            |
-| `alerts_jsonl` | path | (none)  | Write anomaly alerts as JSON lines to this file. Alert detection and output are inline-only; pipeline rejects runs with an enabled detector. |
-
-When `analysis.rtt`, `analysis.retrans`, and `analysis.out_of_order` are all `false`, NetScope automatically switches flow tracking to its compact scale-mode storage path to reduce per-flow memory usage.
-
-### `[analysis.anomalies]`
-
-| Key       | Type | Default | Description               |
-| --------- | ---- | ------- | ------------------------- |
-| `enabled` | bool | `false` | Enable anomaly detection. |
-
-### `[analysis.anomalies.syn_flood]`
-
-| Key                    | Type  | Default | Description                                         |
-| ---------------------- | ----- | ------- | --------------------------------------------------- |
-| `enabled`              | bool  | `true`  | Enable SYN flood detection.                         |
-| `window_secs`          | float | `5.0`   | Sliding window duration for counting SYNs.          |
-| `syn_threshold`        | int   | `200`   | SYN count that triggers an alert.                   |
-| `unique_src_threshold` | int   | `50`    | Minimum unique source IPs required to trigger.      |
-| `cooldown_secs`        | float | `10.0`  | Minimum seconds between alerts for the same target. |
-
-### `[analysis.anomalies.port_scan]`
-
-| Key                      | Type  | Default | Description                                         |
-| ------------------------ | ----- | ------- | --------------------------------------------------- |
-| `enabled`                | bool  | `true`  | Enable port scan detection.                         |
-| `window_secs`            | float | `10.0`  | Sliding window duration.                            |
-| `unique_ports_threshold` | int   | `25`    | Unique destination ports that trigger an alert.     |
-| `unique_hosts_threshold` | int   | `10`    | Unique destination hosts that trigger an alert.     |
-| `cooldown_secs`          | float | `30.0`  | Minimum seconds between alerts for the same source. |
-
-### `[web]`
-
-| Key             | Type   | Default       | Description                                                                         |
-| --------------- | ------ | ------------- | ----------------------------------------------------------------------------------- |
-| `enabled`       | bool   | `false`       | Enable the web dashboard.                                                           |
-| `bind`          | string | `"127.0.0.1"` | HTTP server bind address.                                                           |
-| `port`          | int    | `8080`        | HTTP server port.                                                                   |
-| `tick_ms`       | int    | `1000`        | How often stats are pushed to WebSocket clients (ms). Minimum 16ms.                 |
-| `top_n`         | int    | `10`          | Number of top flows included in each stats tick.                                    |
-| `packet_buffer` | int    | `2000`        | Number of packets kept in the ring buffer for detail inspection.                    |
-| `sample_rate`   | int    | `1`           | Send every Nth packet to the UI. Set to 0 to disable the live packet feed entirely. |
-| `payload_bytes` | int    | `256`         | Maximum raw bytes stored per packet for hex dump display.                           |
-
-These keys apply only when `web.enabled = true`. Packet sampling uses the capture-wide packet id, so `sample_rate` is global in both inline and pipeline modes. Packet detail storage is keyed by packet id, so lookups remain stable even if pipeline events arrive slightly out of order.
-
-Note: `payload_bytes` limits how many bytes are stored for the web packet detail hex dump (see `build_packet_data` in `src/lib.rs`). It does not change capture `snaplen` or what is written to pcap.
-
-Prometheus-compatible metrics are served at `GET /metrics` when the web dashboard is enabled. This endpoint shares the same TLS (`[web.tls]`) and HTTP Basic auth (`[web.auth]`) settings as the rest of the dashboard.
-
-### `[web.tls]`
-
-| Key         | Type | Default | Description                                                   |
-| ----------- | ---- | ------- | ------------------------------------------------------------- |
-| `enabled`   | bool | `false` | Enable HTTPS for the web dashboard.                           |
-| `cert_path` | path | (none)  | PEM certificate path. Required when `web.tls.enabled = true`. |
-| `key_path`  | path | (none)  | PEM private key path. Required when `web.tls.enabled = true`. |
-
-When enabled, NetScope serves the dashboard over HTTPS and expects certificate/key files to be readable at startup.
-
-### `[web.auth]`
-
-| Key             | Type   | Default | Description                                                                       |
-| --------------- | ------ | ------- | --------------------------------------------------------------------------------- |
-| `enabled`       | bool   | `false` | Enable HTTP Basic auth for all dashboard routes (including `/ws` and `/metrics`). |
-| `username`      | string | `""`    | HTTP Basic auth username. Required when `web.auth.enabled = true`.                |
-| `password`      | string | (none)  | Inline password value. Use either this key or `password_file`, not both.          |
-| `password_file` | path   | (none)  | File containing the password value. Use either this key or `password`.            |
-
-Validation rules when `web.auth.enabled = true`:
-
-- `username` must be non-empty.
-- Exactly one secret source must be configured: `password` or `password_file`.
-
-For safer operations, prefer `password_file` over inline `password` so credentials are not stored directly in shared config templates.
-
-### `[pipeline]`
-
-| Key                | Type | Default | Description                                                                                        |
-| ------------------ | ---- | ------- | -------------------------------------------------------------------------------------------------- |
-| `enabled`          | bool | `false` | Enable the sharded pipeline for multi-core processing.                                             |
-| `workers`          | int  | `0`     | Number of worker threads. 0 = auto-detect (half of CPU count, clamped 1..8).                       |
-| `channel_capacity` | int  | `4096`  | Bounded channel size per worker shard. Live capture drops and counts packets when full; offline PCAP processing waits for queue space. |
-
-For behavior behind these settings, see [Design](design.md). This page remains the source of truth for compiled defaults.
-
-## Minimal Config Example
+## Minimal config
 
 ```toml
 [capture]
-interface = "en0"
-filter = "tcp"
+read_pcap = "examples/pcaps/normal.pcap"
 
 [output]
 quiet = true
-
-[stats]
-enabled = true
-top_flows = 5
-
-[web]
-enabled = true
+summary_json = "/tmp/netscope-summary.json"
+export_json = "/tmp/netscope-flows.json"
 ```
 
-## Full Example
-
-See [`netscope.example.toml`](../netscope.example.toml) for a full template covering all sections with comments and representative optional keys. Use the tables above as the source of truth for compiled defaults.
-
-## Common command options
-
-| Task | Options | Notes |
-| --- | --- | --- |
-| Read a capture | `--read-pcap`, `--filter`, `--count` | Offline reading needs no capture privileges. |
-| Capture live traffic | `--interface`, `--filter`, `--snaplen`, `--timeout-ms` | Interface permissions are required. |
-| Save results | `--summary-json`, `--export-json`, `--export-csv`, `--alerts-jsonl`, `--expired-flows-jsonl`, `--expired-flows-csv` | The CLI appendix documents each option and mode restriction. |
-| Save captured packets | `--write-pcap`, `--write-pcap-rotate-mb`, `--write-pcap-max-files` | Rotation is bounded by a maximum retained segment count. |
-| Use multiple workers | `--pipeline`, `--workers` | Pipeline mode is opt-in; anomaly detection is inline-only. |
-| Start the dashboard | `--web`, `--web-bind`, `--web-port` | Local bind is the default. Use TLS and authentication for remote access. |
-
-## Export formats
-
-| Output | Format | Semantics |
-| --- | --- | --- |
-| `--write-pcap` | Classic pcap | Records capture-thread input before pipeline dispatch. Rotation writes numbered segments and requires both rotation options. |
-| `--export-json` | JSON array | Final snapshot of tracked flows, sorted by total bytes. |
-| `--export-csv` | CSV | One row per flow with a header; fields are numeric values, enum labels, and IP addresses. |
-| `--alerts-jsonl` | JSON Lines | Versioned anomaly records; available in inline mode only. |
-| `--expired-flows-jsonl` / `--expired-flows-csv` | JSON Lines / CSV | Flow records are written as they expire or are evicted, with a `reason` field. |
-| `--summary-json` | Versioned JSON object | Final input, parse, pipeline, flow, alert, drop, timing, and output-error accounting. Pipeline or live-only counters are `null` when unavailable. See [Phase 1's field contract](streamlining-plan.md#phase-1-implementation-details). |
-
-### CSV columns and file behavior
-
-`--export-csv` writes this header, then one row per tracked flow:
-
-```text
-protocol,endpoint_a_ip,endpoint_a_port,endpoint_b_ip,endpoint_b_port,first_seen,last_seen,duration_secs,packets_a_to_b,packets_b_to_a,bytes_a_to_b,bytes_b_to_a,packets_total,bytes_total,avg_bps,tcp_state,client,retransmissions,out_of_order,rtt_last_ms,rtt_min_ms,rtt_ewma_ms,rtt_samples
-```
-
-`--expired-flows-csv` uses the same columns prefixed by `ts,reason`. It appends to an existing file and writes the header only when the file is new or empty. `--export-csv` replaces an existing file. Both exports write unquoted comma-separated values; optional fields without a value are empty. The current columns contain numeric values, enum labels, and IP addresses.
-
-### Flow fields
-
-JSON flow exports contain these fields; CSV uses flattened endpoint columns. `endpoint_a` and `endpoint_b` are ordered canonically, so both traffic directions belong to one record.
-
-| Field | Meaning |
-| --- | --- |
-| `protocol`, `endpoint_a`, `endpoint_b` | Transport protocol and the two IP/port endpoints. |
-| `first_seen`, `last_seen`, `duration_secs` | Capture timestamps and elapsed flow duration. |
-| `packets_a_to_b`, `packets_b_to_a`, `bytes_a_to_b`, `bytes_b_to_a` | Directional packet and wire-byte totals. |
-| `packets_total`, `bytes_total`, `avg_bps` | Totals and average bit rate over the flow duration. |
-| `tcp_state`, `client` | Packet-inferred TCP state and SYN initiator; `null` where unavailable. |
-| `retransmissions`, `out_of_order` | Packet-level TCP sequence observations. |
-| `rtt_last_ms`, `rtt_min_ms`, `rtt_ewma_ms`, `rtt_samples` | RTT samples when deep TCP tracking is enabled; otherwise values are unavailable or zero. |
-
-Example flow object:
-
-```json
-{
-  "protocol": "tcp",
-  "endpoint_a": { "ip": "192.0.2.10", "port": 51514 },
-  "endpoint_b": { "ip": "198.51.100.20", "port": 443 },
-  "first_seen": 1706123400.123456,
-  "last_seen": 1706123460.654321,
-  "duration_secs": 60.530865,
-  "packets_a_to_b": 150,
-  "packets_b_to_a": 200,
-  "bytes_a_to_b": 12400,
-  "bytes_b_to_a": 485000,
-  "packets_total": 350,
-  "bytes_total": 497400,
-  "avg_bps": 65712.3,
-  "tcp_state": "established",
-  "client": "a_to_b",
-  "retransmissions": 2,
-  "out_of_order": 0,
-  "rtt_last_ms": 15.2,
-  "rtt_min_ms": 12.8,
-  "rtt_ewma_ms": 14.1,
-  "rtt_samples": 45
-}
-```
-
-Anomaly JSONL records include `schema_version`, `ts`, `kind`, available source/target identifiers, `window_secs`, threshold and observed counts, and a human-readable description. For example:
-
-```json
-{"schema_version":1,"ts":1706123456.789,"kind":"syn_flood","source_ip":null,"target_ip":"10.0.0.1","target_port":443,"window_secs":5.0,"thresholds":{"syn_count":200,"unique_sources":50,"unique_ports":null,"unique_hosts":null},"observed":{"syn_count":250,"unique_sources":60,"unique_ports":null,"unique_hosts":null},"description":"SYN flood suspected: 250 syns, 60 sources to 10.0.0.1:443"}
-```
-
-Expired-flow records add `ts` and `reason` (`timeout` or `eviction`) to the flow fields. The exact summary JSON contract remains in the execution plan so there is one canonical definition.
+Run it with `./target/release/netscope --config run.toml`. For live-use examples and permission notes, see [Quickstart](quickstart.md). For protocol scope, mode behavior, and dashboard semantics, see [Design](design.md).

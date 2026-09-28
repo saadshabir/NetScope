@@ -1,64 +1,62 @@
 # Design
 
-NetScope reads packets from libpcap, decodes supported headers, updates bidirectional flow state, and optionally sends bounded summaries to the local dashboard. Inline processing is the default; the sharded pipeline is opt-in with `--pipeline` or a nonzero `--workers` value.
+NetScope reads a PCAP or a live libpcap source, parses supported headers, updates bidirectional TCP/UDP flows, and emits summaries and optional views. Inline processing is the default. Worker sharding is an opt-in live/throughput path with explicit limits.
 
 ## Processing modes
 
 ```mermaid
 flowchart LR
-    Capture --> Inline[Inline parser and flow tracker]
-    Capture --> Router[Pipeline router]
-    Router --> Workers[Flow-keyed worker shards]
-    Workers --> Aggregate[Summary and dashboard aggregation]
-    Inline --> Outputs[Exports and optional dashboard]
-    Aggregate --> Outputs
+    SRC[PCAP or libpcap] --> CAP[Capture reader]
+    CAP --> INLINE[Inline parser and flow table]
+    CAP --> ROUTE[Canonical flow tuple router]
+    ROUTE --> QUEUES[Bounded worker queues]
+    QUEUES --> WORKERS[Worker-owned parser and flow tables]
+    WORKERS --> AGG[Aggregator]
+    INLINE --> OUT[Summary and exports]
+    AGG --> OUT
+    OUT --> WEB[Optional local dashboard]
 ```
 
-Offline PCAP input uses bounded backpressure: a full worker queue slows file reading so input frames are not discarded. Live dispatch stays nonblocking and counts queue drops separately from kernel/libpcap and interface drops. Pipeline shutdown drains workers before final summaries and flow exports are written. Pcap output records capture-thread input before worker dispatch.
+Inline mode owns one flow table and one global anomaly detector. Pipeline mode routes both directions of a flow to the same worker, then merges worker summaries at shutdown. Offline reads block when queues fill, so file input is processed with backpressure. Live capture dispatch remains nonblocking; queue-full frames are counted as application dispatch drops. A capture PCAP is written before pipeline dispatch and can therefore contain frames absent from worker-side flows.
 
-The router hashes the canonical full flow tuple. Packets in one flow stay together, but unrelated flows to the same destination can reach different workers. Anomaly detection therefore runs in inline mode only; pipeline runs reject anomaly-enabled configuration before capture. In pipeline mode, the configured `flow.max_flows` budget is divided across shards. A busy shard can evict early while another has unused capacity, and pruning can temporarily overshoot during a burst.
+`flow.max_flows` is a total pipeline budget split among workers. A busy shard may evict flows while another has spare quota, and pruning occurs at most once per second, so a burst can temporarily exceed a shard's share. If the budget is below the requested worker count, NetScope reduces the active worker count so each shard receives a positive quota.
 
-## Flow model
+Pipeline mode rejects enabled anomaly detection before opening the source. The router hashes the full canonical flow tuple, so sources targeting one destination may reach different shards; per-worker thresholds would change the detector's meaning.
 
-A flow key is `(protocol, endpoint_a, endpoint_b)`, with endpoints ordered canonically so both directions update one record. Each flow stores first and last timestamps, directional packet and wire-byte totals, and a derived average bit rate. TCP tracking can add inferred connection state, client direction, RTT samples, retransmission counts, and out-of-order counts. These are packet-level observations: NetScope does not reassemble TCP streams, and lost or reordered packets can affect the inferred state.
+## Decode and tracking scope
 
-When RTT, retransmission, and out-of-order analysis are all disabled, NetScope uses a compact scale-mode table. This reduces per-flow bookkeeping; it does not make the flow limit a strict instantaneous cap because pruning is periodic.
-
-## Protocol support and depth
-
-| Layer | Implemented depth | Boundaries |
+| Input layer | Recognized data | Flow or payload behavior |
 | --- | --- | --- |
-| Link | Ethernet II, 802.1Q VLAN, stacked 802.1ad QinQ, Linux SLL, loopback NULL/LOOP, raw IP | Other datalink types are reported unsupported. |
-| Network | ARP, IPv4, IPv6 | IPv6 extension walking is bounded to 16 headers. Non-initial IPv4 fragments are skipped for flow tracking. |
-| Transport | TCP, UDP, ICMP, ICMPv6 | TCP/UDP headers are validated; malformed transport is accounted for separately from link/network decode. |
-| Application | DNS question/answer fields on UDP/53; TLS ClientHello SNI when recognized | DNS inspection is narrow. SNI requires a complete ClientHello in one packet; ECH or TCP segmentation can hide it. |
+| Ethernet, Linux SLL v1, NULL/LOOP loopback, raw IP | Link type and supported inner network headers; Ethernet supports up to four 802.1Q/802.1ad tags. | Other link types, including SLL2, are reported unsupported. |
+| ARP | Address and operation fields. | Decoded, but no flow is created. |
+| IPv4 / IPv6 | Address, lengths, and network fields; IPv6 walks at most 16 common extension headers. | Non-initial fragments are skipped. There is no fragment reassembly. |
+| TCP / UDP | Transport header fields and ports. | Bidirectional flows with directional counts. Malformed supported headers are classified separately. |
+| ICMP / ICMPv6 | Type/code and echo identifier/sequence when present. | Decoded, but no flow is created. |
+| DNS | UDP involving port 53; first query question and response section counts. | Packet-level decode only; no DNS-over-TCP or encrypted DNS inspection. |
+| TLS | Best-effort SNI from a complete ClientHello in one TCP payload. | No TCP stream reassembly; split ClientHello messages can be missed and ECH can conceal SNI. |
 
-Protocol recognition does not imply full dissection. Use Wireshark/TShark when broad protocol decoding or general TCP stream reassembly is needed.
+TCP state, client direction, RTT, retransmission, and out-of-order fields are inferred from captured packets. They do not reconstruct a TCP byte stream. Capture-file support is limited by libpcap plus the link types above; classic PCAP is the checked-in and reproducible baseline. PCAPNG support is broader but has only a minimal single-interface Ethernet verification in the current evidence.
 
-## Anomaly heuristics
+The final run summary distinguishes frames read, packets parsed, network and transport headers recognized, parse errors, malformed transports, unsupported packets, flows, alerts, worker accounting, and drop sources. Unavailable counters are `null`, not zero. See [Reference](reference.md) for output contracts.
 
-The optional detectors look for source-diverse initial SYN bursts to one target and bursts of SYN probes across distinct destination ports or hosts. Their time windows, thresholds, and cooldowns live under `[analysis.anomalies]`; the checked-in [`anomaly-demo.toml`](../examples/anomaly-demo.toml) uses deliberately low values for synthetic examples. Threshold crossings are alerts for investigation, not proof of malicious intent. Benign monitoring and inventory scans can satisfy the same rules.
+## Anomaly semantics
 
-Alerts are written as JSON Lines with a schema version, event time, kind, available source/target identifiers, window and threshold context, observed counts, and description. Anomaly state expires by event time and is periodically swept to bound stale queues and cooldown entries.
+The two detectors are configurable heuristics, not signature-based intrusion detection:
 
-## Dashboard
+- **SYN flood:** counts initial TCP SYN observations in a sliding time window and requires both the configured SYN count and unique-source threshold for a target.
+- **Port scan:** counts distinct destination ports and hosts observed from a source within its configured window; either configured unique-target threshold can fire the alert.
 
-The optional dashboard runs in a separate async runtime and binds to `127.0.0.1:8080` by default. It serves `/`, WebSocket updates at `/ws`, health at `/api/health`, and Prometheus text at `/metrics`. Packet samples are bounded and can be reduced with `web.sample_rate`; dashboard event delivery is best-effort and may drop updates under load without blocking packet capture. Packet details are available only while the packet remains in the ring buffer.
+Each detector has a per-key cooldown. Expired observations and cooldowns are pruned even when a key becomes inactive. Out-of-order capture timestamps use a monotonic event-time watermark so state does not move backward. A benign scanner, inventory check, or traffic burst may meet a threshold; a PCAP alone cannot establish intent, service impact, or whether a handshake completed.
 
-The embedded UI uses the vendored Chart.js asset. TLS and Basic auth are configurable, but a remote bind should use both so captured data and credentials are protected. The configured `web.payload_bytes` limits stored packet data for the inspector; it does not change capture snaplen or pcap output.
+## Dashboard and security
 
-## Contributor notes
+The optional dashboard runs in a dedicated server thread and consumes inline updates or aggregated pipeline frames. It offers `/`, `/ws`, `/api/health`, and `/metrics`. Packet samples are capture-wide, while detail data is kept in a bounded ring buffer. `sample_rate = 0` disables packet samples without disabling stats or alerts. Chart.js is vendored so the dashboard works offline; keep its license alongside the asset.
 
-| Area | Location |
-| --- | --- |
-| Capture, CLI, and configuration | `src/capture/`, `src/cli.rs`, `src/config.rs` |
-| Protocol decoding and packet formatting | `src/protocol/`, `src/packet_format.rs` |
-| Flow state and exports | `src/flow/` |
-| Anomaly analysis and pipeline | `src/analysis/`, `src/pipeline/` |
-| Dashboard server and embedded UI | `src/web/`, `web/static/` |
-| Small synthetic PCAPs and investigations | `scripts/generate_examples.py`, `examples/` |
+The server defaults to `127.0.0.1`. For remote access, enable TLS and authentication as shown in [Reference](reference.md#remote-dashboard). Basic auth covers every dashboard endpoint, including `/metrics` and the WebSocket handshake; without TLS, credentials travel over cleartext HTTP.
 
-For a protocol change, add a bounded parser under `src/protocol/`, cover a meaningful valid or malformed boundary, and update the example manifest only if the fixture set changes. For a user-visible behavior change, update the relevant reference/design page and preserve the final-summary accounting contract. The normal quality gates are:
+## Development checks
+
+The focused project gates are:
 
 ```sh
 cargo fmt -- --check
@@ -66,6 +64,8 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 cargo build --locked --release
 python3 scripts/generate_examples.py --check
+python3 scripts/perf/test_workloads.py
+python3 scripts/perf/test_live_capture.py
 ```
 
-The benchmark runners and evidence format are described in [Performance](performance.md). Live replay and long performance jobs are intentionally separate from ordinary CI.
+Add coverage for observable behavior or a concrete regression risk. Keep long performance runs and privileged live replay outside ordinary CI.

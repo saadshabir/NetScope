@@ -3,7 +3,7 @@
 Generated: `2026-09-26T21:57:27Z`
 Source commit: `f85891b6a61f611bac90535082f75d88838d27e5`; dirty worktree: **true**; source fingerprint: `f1f7310577a1e90aa36e5815f3541eb64e2df6972f6ec5e762eb2922fe9b686c`.
 Binary SHA-256: `5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510`.
-The exact source inputs are saved in `source-snapshot/`; see its `README.md` for reconstruction.
+The measured application source and published harness copies are saved in `source-snapshot/`; its `README.md` explains reconstruction, publication edits, and original versus published hashes.
 Host: macOS-27.0-arm64-arm-64bit; CPU Apple M4; 10 logical / 10 physical CPUs; memory 16,384 MiB.
 Rust: `rustc 1.93.1 (01f6ddf75 2026-02-11)`; libpcap: `unavailable`; power/governor: `Now drawing from 'AC Power' -InternalBattery-0 (id=23003235) 80%; AC attached; not charging present: true`.
 
@@ -63,3 +63,7 @@ The latest repeat batch still had more than 10% throughput spread for: `steady-f
 The exact invocation, source fingerprint, binary hash, and per-run commands are recorded in `metadata.json` and `results.json`. `scripts/perf/workloads.py` recreates each checksummed trace. Each manifest records the deterministic seed, traffic profile, SHA-256, packet count, wire bytes, and flow cardinality.
 
 A spread over 10% of a scenario median is flagged for a quieter repeat; the report does not select the fastest repetition. See `results.json` for exact per-run spread and validation state.
+
+## Publication notes
+
+Unrelated documentation was omitted from the public source snapshot, harness diagnostic labels were normalized, and report/schema support for publication metadata was added. Historical build-directory labels were normalized in archived paths and build output. Measurement values, validation results, PCAP hashes, and original source and binary fingerprints were retained. See `source-snapshot/published-manifest.json` for hashes of the public copies.

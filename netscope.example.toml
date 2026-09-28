@@ -1,6 +1,6 @@
 # Example NetScope config template.
 # CLI flags override these values when explicitly provided.
-# For field descriptions and authoritative defaults, see docs/reference.md.
+# For settings and output behavior, see docs/reference.md.
 
 [capture]
 # interface = "en0"
@@ -22,6 +22,7 @@ write_pcap_rotate_mb = 0  # >0 enables size-based pcap rotation (MiB)
 write_pcap_max_files = 0  # keep newest N rotated segments; requires rotate_mb > 0
 export_json = ""
 export_csv = ""
+summary_json = ""
 expired_flows_jsonl = ""
 expired_flows_csv = ""
 hex_dump = false

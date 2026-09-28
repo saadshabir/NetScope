@@ -42,6 +42,7 @@ def current_load() -> list[float] | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", type=Path, required=True, help="directory containing results.json")
+    parser.add_argument("--binary", type=Path, help="relocated baseline binary; its SHA-256 must match the saved run")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--scenario-id", action="append", required=True)
     parser.add_argument("--repetitions", type=int, default=5)
@@ -60,9 +61,10 @@ def main() -> int:
     baseline = load_json(baseline_dir / "results.json")
     source = load_json(baseline_dir / "source.json")
     binary_info = baseline["binary"]
-    binary = Path(binary_info["path"]).resolve()
+    binary_path = args.binary if args.binary is not None else Path(binary_info["path"])
+    binary = (ROOT / binary_path).resolve() if not binary_path.is_absolute() else binary_path.resolve()
     if not binary.is_file() or sha256_file(binary) != binary_info["sha256"]:
-        raise RuntimeError("the saved baseline binary is missing or its SHA-256 changed")
+        raise RuntimeError("the saved baseline binary is missing or its SHA-256 changed; use --binary with the matching saved binary")
 
     adapter, adapter_name = time_adapter()
     load_start = current_load()
