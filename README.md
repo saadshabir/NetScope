@@ -1,27 +1,27 @@
 # NetScope
 
-NetScope is a Rust and libpcap tool for reading packet captures, summarizing bidirectional flows, and inspecting a small set of protocol and anomaly signals. Offline analysis runs without capture privileges; live capture and the optional local dashboard are available when needed.
-
-Build and inspect the checked-in sample without root:
+NetScope is a Rust packet and flow investigation tool. It reads a PCAP or captures live traffic, tracks bidirectional TCP/UDP flows, reports two configurable anomaly heuristics, and can serve an optional local dashboard. Offline analysis is the rootless, reproducible starting point.
 
 ```sh
 cargo build --locked --release
-./target/release/netscope --read-pcap examples/pcaps/normal.pcap --quiet
+./target/release/netscope --read-pcap examples/pcaps/normal.pcap --quiet \
+  --summary-json /tmp/netscope-summary.json \
+  --export-json /tmp/netscope-flows.json
 ```
 
-The parser supports Ethernet, Linux SLL, loopback, and raw IP captures, with bounded IPv6 extension walking. DNS inspection is limited to UDP/53; TLS SNI is best-effort from a complete ClientHello in one packet. SYN-flood and port-scan alerts are threshold heuristics supported in inline mode. See [Design](docs/design.md) for behavior and limits.
+The checked-in trace contains eight synthetic packets across one TCP/TLS and one UDP/DNS flow. It is small, deterministic, and requires no capture privileges. See [all PCAP investigations](examples/README.md) for expected fields and parser-edge cases.
 
-## Guides
+Live capture requires permission to read the interface, usually `sudo` or Linux `CAP_NET_RAW`. The dashboard binds to `127.0.0.1` by default. See [Quickstart](docs/quickstart.md) for setup, live capture, and troubleshooting.
 
-- [Quickstart](docs/quickstart.md) — build, first run, common commands, permissions, and troubleshooting.
-- [Synthetic PCAP investigations](examples/README.md) — normal traffic, the anomaly heuristics, and parser boundaries.
-- [Reference](docs/reference.md) — configuration defaults and schemas, exports, and command-line pointers.
-- [Design](docs/design.md) — processing modes, flows, protocol depth, anomalies, dashboard, and contributor notes.
-- [Performance](docs/performance.md) — reproducible offline measurements and the separate live-loss procedure.
-- [Tool comparison](docs/comparison.md) — what NetScope, tcpdump, TShark/Wireshark, Zeek, and Suricata are suited to.
+## Documentation
 
-Active implementation record: [streamlining plan](docs/streamlining-plan.md).
+- [Quickstart](docs/quickstart.md): build, first PCAP, live permissions, and troubleshooting.
+- [Reference](docs/reference.md): config precedence, output formats, and summary semantics.
+- [Design](docs/design.md): parsing scope, flows, anomalies, pipeline, and dashboard boundaries.
+- [Performance](docs/performance.md): reproducible offline measurements and the Linux live-loss procedure.
+- [Tool comparison](docs/comparison.md): commands against the same sample PCAP and tool-selection guidance.
+- [Changelog](CHANGELOG.md): release history and cleanup record.
 
 ## License
 
-MIT License. See [LICENSE](LICENSE). The dashboard vendors Chart.js; its license is in `web/static/vendor/chartjs/LICENSE.md`.
+MIT. See [LICENSE](LICENSE). Chart.js is vendored for the embedded dashboard; its license is retained at [`web/static/vendor/chartjs/LICENSE.md`](web/static/vendor/chartjs/LICENSE.md).

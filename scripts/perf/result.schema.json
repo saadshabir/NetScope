@@ -54,7 +54,9 @@
           "type": "object",
           "required": ["complete", "patch_path", "untracked_root", "reconstruction_guide"],
           "properties": {
-            "complete": { "const": true },
+            "complete": { "type": "boolean" },
+            "application_complete": { "type": "boolean" },
+            "published_manifest": { "type": "string" },
             "patch_path": { "type": "string" },
             "untracked_root": { "type": "string" },
             "reconstruction_guide": { "type": "string" }

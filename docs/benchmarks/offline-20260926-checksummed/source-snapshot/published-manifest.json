@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "application_complete": true,
+  "exact_original_worktree": false,
+  "original_source_tree_sha256": "60d7b6ce1113d8f8760b81ddd6f690e596bc8a57c122b02fe0e5d619becb2a1d",
+  "original_tracked_diff_sha256": "aa506f0cb2bcea0da1be51c12341b941f45a20112626d85e3969b00102ce38f0",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 1613,
+      "sha256": "b4b36f1934a8564ff10aabc3ec5b4065546170ef48134fa50be464334a3954bc"
+    },
+    {
+      "path": "application.patch",
+      "bytes": 2065,
+      "sha256": "1356b551a380cae91fe7e1bb75a74df3842cd3d3cbb988469e0895b93d348151"
+    },
+    {
+      "path": "untracked/scripts/perf/profile_offline.py",
+      "bytes": 6959,
+      "sha256": "2a6309db2fc70dcc715e08e21b51f084c00d58912340c25b591796f40c9ead77"
+    },
+    {
+      "path": "untracked/scripts/perf/repeat_scenarios.py",
+      "bytes": 9592,
+      "sha256": "6915505576b39b85507651bad54993ca95b1a3ffeb56d70f5671328e74c400a8"
+    },
+    {
+      "path": "untracked/scripts/perf/result.schema.json",
+      "bytes": 7906,
+      "sha256": "49a53db8914235e1080afd2ce9ef417452ae073e38dccf93bc09468ed075c067"
+    },
+    {
+      "path": "untracked/scripts/perf/run_offline.py",
+      "bytes": 66983,
+      "sha256": "921d3b9dfd83925d411f8d52b5c61209db1ae0544cf15b366a8be11eef300440"
+    },
+    {
+      "path": "untracked/scripts/perf/test_workloads.py",
+      "bytes": 1672,
+      "sha256": "401f103d364f7fb051659aabdce96d5a81352ae4e8d8735b1e0467409cb4870a"
+    },
+    {
+      "path": "untracked/scripts/perf/workloads.py",
+      "bytes": 12104,
+      "sha256": "81fb1da0af0c69dcdecd3e11de617f9bbf2346c47bd8b4f24fc133905b6ee11b"
+    }
+  ]
+}

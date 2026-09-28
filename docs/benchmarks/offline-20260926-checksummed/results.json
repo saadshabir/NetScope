@@ -21376,15 +21376,16 @@
     "dirty": true,
     "fingerprint_method": "commit + binary diff from HEAD + SHA-256 of each untracked regular file",
     "snapshot": {
-      "complete": true,
-      "patch_path": "source-snapshot/working-tree.patch",
+      "complete": false,
+      "application_complete": true,
+      "patch_path": "source-snapshot/application.patch",
+      "untracked_root": "source-snapshot/untracked",
       "reconstruction_guide": "source-snapshot/README.md",
-      "untracked_root": "source-snapshot/untracked"
+      "published_manifest": "source-snapshot/published-manifest.json"
     },
     "source_tree_sha256": "60d7b6ce1113d8f8760b81ddd6f690e596bc8a57c122b02fe0e5d619becb2a1d",
     "status_porcelain": [
       " M docs/performance.md",
-      " M docs/streamlining-plan.md",
       " M src/main.rs",
       " M src/pipeline/mod.rs",
       "?? scripts/perf/profile_offline.py",
@@ -21426,7 +21427,8 @@
         "path": "scripts/perf/workloads.py",
         "sha256": "81fb1da0af0c69dcdecd3e11de617f9bbf2346c47bd8b4f24fc133905b6ee11b"
       }
-    ]
+    ],
+    "fingerprint_scope": "original measured worktree before publication edits"
   },
   "workloads": [
     {

@@ -2,7 +2,7 @@
   "anomaly_detection_enabled": false,
   "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
   "command": [
-    "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+    "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
     "--config",
     "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/runs/steady-flow-pipeline-w4-n100000/measured-03/config.toml",
     "--read-pcap",

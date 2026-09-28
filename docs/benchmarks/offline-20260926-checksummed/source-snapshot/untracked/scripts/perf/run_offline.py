@@ -1107,6 +1107,8 @@ def write_report(path: Path, envelope: dict[str, Any]) -> None:
     ]
     if source.get("snapshot", {}).get("complete"):
         lines.insert(5, "The exact dirty source inputs are saved in `source-snapshot/`; see its `README.md` for reconstruction.")
+    elif source.get("snapshot", {}).get("application_complete"):
+        lines.insert(5, "The measured application source and published harness copies are saved in `source-snapshot/`; its `README.md` explains reconstruction, publication edits, and original versus published hashes.")
     elif source["dirty"]:
         lines.insert(5, "Historical source limitation: this dirty-tree run saved hashes but not a complete source snapshot, so the recorded fingerprint alone cannot reconstruct the build.")
     for row in aggregates:
@@ -1294,9 +1296,9 @@ def default_output_dir() -> Path:
 
 def run_benchmarks(args: argparse.Namespace) -> int:
     if args.repetitions < 5:
-        raise RuntimeError("Phase 4 runs require at least five measured repetitions")
+        raise RuntimeError("benchmark runs require at least five measured repetitions")
     if args.warmups < 1:
-        raise RuntimeError("Phase 4 runs require at least one consistent warm-up")
+        raise RuntimeError("benchmark runs require at least one consistent warm-up")
     if args.packets < 1 or args.dashboard_packets < 1:
         raise RuntimeError("packet counts must be positive")
 

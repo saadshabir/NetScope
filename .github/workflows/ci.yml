@@ -17,8 +17,10 @@ jobs:
       - name: Verify synthetic PCAP fixtures
         run: python3 scripts/generate_examples.py --check
 
-      - name: Check benchmark workload helpers
-        run: python3 -m unittest discover -s scripts/perf -p 'test_*.py'
+      - name: Verify benchmark inputs and live-run classification
+        run: |
+          python3 scripts/perf/test_workloads.py
+          python3 scripts/perf/test_live_capture.py
 
       - name: Install system deps
         run: sudo apt-get update && sudo apt-get install -y libpcap-dev
@@ -44,14 +46,28 @@ jobs:
       - name: Release build
         run: cargo build --locked --release
 
-      - name: Offline example smoke (no capture privileges)
-        shell: bash
+      - name: Rootless offline smoke
         run: |
-          output_dir="$(mktemp -d)"
-          trap 'rm -rf "$output_dir"' EXIT
-          for example in normal port-scan syn-flood protocol-edges; do
-            ./target/release/netscope \
-              --read-pcap "examples/pcaps/${example}.pcap" \
-              --quiet \
-              --summary-json "$output_dir/${example}.json"
-          done
+          out="$RUNNER_TEMP/netscope-smoke"
+          mkdir -p "$out"
+          ./target/release/netscope \
+            --read-pcap examples/pcaps/normal.pcap \
+            --quiet \
+            --summary-json "$out/summary.json" \
+            --export-json "$out/flows.json"
+          python3 - "$out" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          out = pathlib.Path(sys.argv[1])
+          summary = json.loads((out / "summary.json").read_text())
+          flows = json.loads((out / "flows.json").read_text())
+          assert summary["status"] == "success", summary
+          assert summary["frames_read"] == 8, summary
+          assert summary["packets_parsed"] == 8, summary
+          assert summary["packet_parse_errors"] == 0, summary
+          assert summary["alerts_emitted"] == 0, summary
+          assert summary["output_errors"] == [], summary
+          assert {flow["protocol"] for flow in flows} == {"tcp", "udp"}, flows
+          PY

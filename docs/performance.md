@@ -4,7 +4,7 @@ This page documents NetScope's offline benchmark system and its first profile-gu
 
 ## Results
 
-The current [baseline](benchmarks/offline-20260926-baseline-checksummed/report.md) and [optimized](benchmarks/offline-20260926-checksummed/report.md) reports use the same checksummed PCAP hashes and configs across all 12 scenarios. Both save exact source patches and untracked scripts alongside raw runs. All runs reconciled their inputs and had zero offline dispatch drops. Supplemental repetitions retain noisy ranges rather than selecting the fastest run.
+The current [baseline](benchmarks/offline-20260926-baseline-checksummed/report.md) and [optimized](benchmarks/offline-20260926-checksummed/report.md) reports use the same checksummed PCAP hashes and configs across all 12 scenarios. Both save application source patches and harness copies alongside raw runs. Their reconstruction guides disclose omitted documentation, normalized diagnostic text, and published-file hashes; original source and binary fingerprints remain recorded. All runs reconciled their inputs and had zero offline dispatch drops. Supplemental repetitions retain noisy ranges rather than selecting the fastest run.
 
 The earlier baseline and optimized suites ran on the same Apple M4 host (10 logical CPUs, 16 GiB RAM, macOS 27, Rust 1.93.1). The environment probe could not identify the libpcap version and records it as unavailable. These suites used synthetic packets with zero checksums. Their application source is recoverable from the recorded commit and the saved [optimized application patch](benchmarks/offline-20260926-after/source-snapshot/application.patch), but the original dirty runner revisions were not retained. Treat these reports as historical measurements with incomplete harness provenance.
 
@@ -55,7 +55,7 @@ The runner creates its input traces in a temporary directory and records their m
 
 The release runner builds with `cargo build --locked --release`, records the source commit, dirty state and source fingerprint, and saves the exact tracked patch and untracked files in `source-snapshot/`. It refuses to publish if source files change during the build or measurement. Each scenario gets a warm-up and at least five measured repetitions. A record includes the command, copied config, stdout, stderr, exit code, final summary, resource readings, and validation result. `scripts/perf/result.schema.json` documents the versioned JSON envelope. To rebuild a dirty-tree run, start from its recorded commit in a clean checkout and follow the saved `source-snapshot/README.md`.
 
-Run all four workload families inline and the three pipeline-supported families with explicit worker counts. `analysis-heavy` enables anomaly detection, which Phase 3 intentionally restricts to inline mode:
+Run all four workload families inline and the three pipeline-supported families with explicit worker counts. `analysis-heavy` enables anomaly detection, which is supported only in inline mode:
 
 ```bash
 python3 scripts/perf/run_offline.py \
@@ -104,21 +104,13 @@ python3 scripts/perf/repeat_scenarios.py \
   --warmups 1
 ```
 
+If the saved binary has moved, add `--binary <PATH>` to the repeat command. Its SHA-256 must match the recorded binary; otherwise run a new suite. Historical build paths in the published reports are normalized labels, not guaranteed local locations.
+
 The benchmark scripts are separate from the live-capture/drop validation. A PCAP run cannot measure kernel or interface loss.
-
-For isolated component timing, run the Criterion harness separately:
-
-```sh
-cargo bench --locked --bench hot_path -- handshake_sequence
-```
-
-These results are useful for focused regressions but do not replace whole-program PCAP measurements.
 
 ## Live capture and packet loss
 
 Use the isolated Linux procedure in [`scripts/perf/live_capture.py`](../scripts/perf/live_capture.py). It creates one deterministic, finite `steady-flow` trace, sets up capture on the receiver end of a named `veth` pair, and runs each offered rate three times. The sender transmits only after NetScope emits `NETSCOPE_READY`; the event includes the selected interface, BPF filter, snaplen, requested capture buffer, promiscuous/immediate modes, worker count, and per-worker queue capacity.
-
-For a manual browser check of the live dashboard, `scripts/perf/smoke-dashboard.sh [interface] [trace.pcap]` waits for the same readiness event before optional continuous replay. It is a UI smoke check only and does not report packet loss.
 
 Create the isolated pair. The runner builds the release binary with `cargo build --locked --release` and saves the exact source inputs and build output before measuring:
 
@@ -149,7 +141,7 @@ The tested requested rates form a bracket, not an exact maximum. The report name
 
 The veth runner is Linux-only. macOS does not provide an equivalent isolated sender/receiver pair through `lo0`; do not use loopback replay to make a loss claim. A manual macOS trial is appropriate only with a second host connected over a dedicated, otherwise unused point-to-point link. Start NetScope on the receiver and wait for `NETSCOPE_READY` before starting finite `tcpreplay` on the sender. Save both command outputs, the NetScope summary, interface-counter readings, and the trace hash. Report unavailable drop counters as unavailable; the Linux runner's automated rate bracketing does not apply to that manual setup.
 
-The implementation host for this phase is macOS 27.0 and has no Linux `ip` utility or Docker/Podman runtime. Therefore the checked-in [live-capture report](benchmarks/live-capture/report.md) records the measurement as pending; it contains no claimed live rate or loss number. A Linux run is required to publish those results.
+Controlled Linux live measurements are excluded from the current release scope. The checked-in [live-capture report](benchmarks/live-capture/report.md) records no measured live rate or loss number. Run the procedure above on Linux before publishing such results.
 
 ## Tuning
 
@@ -182,4 +174,4 @@ The implementation host for this phase is macOS 27.0 and has no Linux `ip` utili
 - Lower `packet_buffer` to retain fewer dashboard packets.
 - For large flow-count runs, disable deep TCP analysis (`analysis.rtt = false`, `analysis.retrans = false`, `analysis.out_of_order = false`) to use scale-mode flow storage.
 
-Peak process RSS is measured by the offline runner while it processes a generated PCAP. This includes parsing, flow creation, and queue behavior for the selected workload; it is not a synthetic flow-table-only measurement. The workload manifest and each raw repetition are retained with the result.
+The published peak-RSS measurements come from whole-process runs over deterministic PCAP workloads. They include parsing and the configured flow workload; they should not be read as isolated per-flow storage cost. Use high-cardinality manifests when comparing memory behavior, and retain the host and raw-run records.

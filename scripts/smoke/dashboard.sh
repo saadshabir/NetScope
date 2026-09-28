@@ -5,24 +5,25 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 cat <<'EOF'
-Manual dashboard smoke only. This script does not measure throughput or packet
-loss. For loss measurements, use scripts/perf/live_capture.py on an isolated
-Linux veth pair.
+Manual live-dashboard smoke only. This script does not measure throughput or
+packet loss. For loss measurements, use scripts/perf/live_capture.py on an
+isolated Linux veth pair.
 EOF
 
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/perf/smoke-dashboard.sh [interface] [trace.pcap]
+  scripts/smoke/dashboard.sh [interface] [trace.pcap]
 
 The optional trace is replayed only after NetScope prints its NETSCOPE_READY
 event. Replay is continuous and stops when you interrupt this script.
 
 Environment overrides:
   PPS=100000
+  CONFIG=scripts/smoke/dashboard.toml
   BINARY=./target/release/netscope
   TCPREPLAY_BIN=$(command -v tcpreplay)
-  LOG_DIR=tmp/perf
+  LOG_DIR=tmp/smoke
 EOF
 }
 
@@ -34,12 +35,17 @@ fi
 IFACE="${1:-}"
 TRACE="${2:-}"
 PPS="${PPS:-100000}"
+CONFIG="${CONFIG:-scripts/smoke/dashboard.toml}"
 BINARY="${BINARY:-./target/release/netscope}"
 TCPREPLAY_BIN="${TCPREPLAY_BIN:-$(command -v tcpreplay || true)}"
-LOG_DIR="${LOG_DIR:-tmp/perf}"
+LOG_DIR="${LOG_DIR:-tmp/smoke}"
 
 if [[ "$BINARY" != /* ]]; then
-  BINARY="$ROOT_DIR/${BINARY#./}"
+  BINARY="$(cd "$(dirname "$BINARY")" && pwd)/$(basename "$BINARY")"
+fi
+if [[ ! -f "$CONFIG" ]]; then
+  echo "error: config file not found: $CONFIG" >&2
+  exit 1
 fi
 if [[ -n "$TRACE" && ! -f "$TRACE" ]]; then
   echo "error: trace file not found: $TRACE" >&2
@@ -54,10 +60,6 @@ if [[ -n "$TRACE" && -z "$TCPREPLAY_BIN" ]]; then
   exit 1
 fi
 if [[ ! -x "$BINARY" ]]; then
-  if [[ "$BINARY" != "$ROOT_DIR/target/release/netscope" ]]; then
-    echo "error: binary not found or not executable: $BINARY" >&2
-    exit 1
-  fi
   echo "info: release binary missing, building..."
   cargo build --locked --release
 fi
@@ -96,7 +98,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-args=(--pipeline --quiet --web)
+args=(--config "$CONFIG" --pipeline --quiet --web)
 if [[ -n "$IFACE" ]]; then
   args+=(--interface "$IFACE")
 fi

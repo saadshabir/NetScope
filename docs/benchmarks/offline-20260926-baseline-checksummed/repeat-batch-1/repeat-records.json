@@ -4,7 +4,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/high-cardinality-dashboard-control-pipeline-w4-n1000000/warmup-06/config.toml",
         "--read-pcap",
@@ -197,7 +197,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/high-cardinality-dashboard-control-pipeline-w4-n1000000/measured-07/config.toml",
         "--read-pcap",
@@ -390,7 +390,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/high-cardinality-dashboard-control-pipeline-w4-n1000000/measured-08/config.toml",
         "--read-pcap",
@@ -583,7 +583,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/high-cardinality-dashboard-control-pipeline-w4-n1000000/measured-09/config.toml",
         "--read-pcap",
@@ -776,7 +776,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/high-cardinality-dashboard-control-pipeline-w4-n1000000/measured-10/config.toml",
         "--read-pcap",
@@ -969,7 +969,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/high-cardinality-dashboard-control-pipeline-w4-n1000000/measured-11/config.toml",
         "--read-pcap",
@@ -1162,7 +1162,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-inline-n100000/warmup-06/config.toml",
         "--read-pcap",
@@ -1357,7 +1357,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-inline-n100000/measured-07/config.toml",
         "--read-pcap",
@@ -1552,7 +1552,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-inline-n100000/measured-08/config.toml",
         "--read-pcap",
@@ -1747,7 +1747,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-inline-n100000/measured-09/config.toml",
         "--read-pcap",
@@ -1942,7 +1942,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-inline-n100000/measured-10/config.toml",
         "--read-pcap",
@@ -2137,7 +2137,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-inline-n100000/measured-11/config.toml",
         "--read-pcap",
@@ -2332,7 +2332,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-pipeline-w2-n100000/warmup-06/config.toml",
         "--read-pcap",
@@ -2530,7 +2530,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-pipeline-w2-n100000/measured-07/config.toml",
         "--read-pcap",
@@ -2728,7 +2728,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-pipeline-w2-n100000/measured-08/config.toml",
         "--read-pcap",
@@ -2926,7 +2926,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-pipeline-w2-n100000/measured-09/config.toml",
         "--read-pcap",
@@ -3124,7 +3124,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-pipeline-w2-n100000/measured-10/config.toml",
         "--read-pcap",
@@ -3322,7 +3322,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/mixed-pipeline-w2-n100000/measured-11/config.toml",
         "--read-pcap",
@@ -3520,7 +3520,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/steady-flow-pipeline-w4-n100000/warmup-06/config.toml",
         "--read-pcap",
@@ -3713,7 +3713,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/steady-flow-pipeline-w4-n100000/measured-07/config.toml",
         "--read-pcap",
@@ -3906,7 +3906,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/steady-flow-pipeline-w4-n100000/measured-08/config.toml",
         "--read-pcap",
@@ -4099,7 +4099,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/steady-flow-pipeline-w4-n100000/measured-09/config.toml",
         "--read-pcap",
@@ -4292,7 +4292,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/steady-flow-pipeline-w4-n100000/measured-10/config.toml",
         "--read-pcap",
@@ -4485,7 +4485,7 @@
       "anomaly_detection_enabled": false,
       "binary_sha256": "5034670c954182c4b31e5a5d92466f0a364bc418b8fd058c1397423a9930b510",
       "command": [
-        "/Users/saad/.codex/worktrees/netscope-phase4-baseline/NetScope/target/release/netscope",
+        "/Users/saad/.codex/worktrees/netscope-baseline-build/NetScope/target/release/netscope",
         "--config",
         "/Users/saad/Desktop/Main/Personal/Projects/NetScope/docs/benchmarks/offline-20260926-baseline-checksummed/repeat-batch-1/runs/steady-flow-pipeline-w4-n100000/measured-11/config.toml",
         "--read-pcap",
