@@ -2,6 +2,12 @@
 
 This page documents NetScope's offline benchmark system and its first profile-guided change. The saved reports are the source for measured numbers; Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
 
+- [Results and evidence](#results)
+- [Recreating workloads](#recreating-workloads)
+- [Running the offline suite](#running-the-offline-suite)
+- [Live capture and packet loss](#live-capture-and-packet-loss)
+- [Tuning](#tuning)
+
 ## Results
 
 The current [baseline](benchmarks/offline-20260926-baseline-checksummed/report.md) and [optimized](benchmarks/offline-20260926-checksummed/report.md) reports use the same checksummed PCAP hashes and configs across all 12 scenarios. Both save application source patches and harness copies alongside raw runs. Their reconstruction guides disclose omitted documentation, normalized diagnostic text, and published-file hashes; original source and binary fingerprints remain recorded. All runs reconciled their inputs and had zero offline dispatch drops. Supplemental repetitions retain noisy ranges rather than selecting the fastest run.
@@ -145,6 +151,8 @@ Controlled Linux live measurements are excluded from the current release scope. 
 
 ## Tuning
 
+Change one setting at a time and retain the run summary's `effective_config` alongside the measurement. Worker count, TCP analysis, flow retention, packet sampling, and output files all affect the work being measured. See [output behavior](reference.md#output-behavior) before lowering retention limits.
+
 ### Reducing kernel drops
 
 - Use a BPF filter (`-f "..."`) to reduce traffic entering the capture pipeline.
@@ -169,8 +177,8 @@ Controlled Linux live measurements are excluded from the current release scope. 
 
 ### Reducing memory use
 
-- Lower `max_flows` to cap the flow table. In pipeline mode, the configured budget is divided among worker shards.
-- Reduce `flow.timeout_secs` to expire flows sooner.
+- Lower `flow.max_flows` (CLI: `--max-flows`) to reduce retained flows. Pipeline divides the budget among workers; pruning is periodic, so bursts can temporarily exceed it. `0` means unlimited.
+- Reduce `flow.timeout_secs` to expire flows sooner; `0` disables timeout removal. Removed flows require an expired-flow sink if they must remain in the investigation record.
 - Lower `packet_buffer` to retain fewer dashboard packets.
 - For large flow-count runs, disable deep TCP analysis (`analysis.rtt = false`, `analysis.retrans = false`, `analysis.out_of_order = false`) to use scale-mode flow storage.
 

@@ -14,12 +14,15 @@ flowchart LR
     WORKERS --> AGG[Aggregator]
     INLINE --> OUT[Summary and exports]
     AGG --> OUT
-    OUT --> WEB[Optional local dashboard]
+    INLINE --> WEB[Optional dashboard and metrics]
+    AGG --> WEB
 ```
 
 Inline mode owns one flow table and one global anomaly detector. Pipeline mode routes both directions of a flow to the same worker, then merges worker summaries at shutdown. Offline reads block when queues fill, so file input is processed with backpressure. Live capture dispatch remains nonblocking; queue-full frames are counted as application dispatch drops. A capture PCAP is written before pipeline dispatch and can therefore contain frames absent from worker-side flows.
 
 `flow.max_flows` is a total pipeline budget split among workers. A busy shard may evict flows while another has spare quota, and pruning occurs at most once per second, so a burst can temporarily exceed a shard's share. If the budget is below the requested worker count, NetScope reduces the active worker count so each shard receives a positive quota.
+
+Inline offline flow expiry uses packet timestamps. Pipeline workers also prune against the current wall clock on idle ticks, even for offline input; an older trace can therefore lose retained flows if a worker becomes idle during a longer run. For offline investigations that need capture-time expiry, use inline mode. To disable timeout removal in either mode, use `--flow-timeout-s 0`; the flow budget still applies.
 
 Pipeline mode rejects enabled anomaly detection before opening the source. The router hashes the full canonical flow tuple, so sources targeting one destination may reach different shards; per-worker thresholds would change the detector's meaning.
 

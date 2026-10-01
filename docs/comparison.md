@@ -20,7 +20,7 @@ PCAP="$(pwd)/examples/pcaps/normal.pcap"
 OUT="$(mktemp -d)"
 ```
 
-NetScope shows the packet summary and writes final run and flow records:
+NetScope shows the run summary and writes final run and flow records:
 
 ```sh
 ./target/release/netscope --read-pcap "$PCAP" --quiet \

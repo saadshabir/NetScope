@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Output-inspection commands in the quickstart and a dashboard endpoint reference with health and authenticated metrics examples.
 - Remote dashboard TLS/auth configuration and run-summary field guidance.
 - Five concise reader-facing pages for quickstart, reference, design, performance, and tool comparison; the README now links to them and the synthetic PCAP investigations.
 - A same-PCAP comparison command set for NetScope, tcpdump, TShark, Zeek, and Suricata, with official manual links and execution limits stated.
@@ -32,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Documentation now states flow-export retention, output overwrite/append behavior, working-directory path resolution, worker-option precedence, summary availability on failures, and the offline pipeline's wall-clock expiry limitation.
 - Malformed TCP/UDP transport headers retain partial link/network decoding and are counted as malformed instead of fully successful packets.
 - Avoid duplicate DNS parsing when building web packet summaries + details.
 - Pipeline runs with enabled anomaly detection now fail before capture, preventing misleading per-worker alert thresholds; `--alerts-jsonl` remains available in inline mode.
