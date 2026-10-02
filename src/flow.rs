@@ -17,7 +17,7 @@ pub use model::{
 pub use tracker::{FlowTracker, FlowTrackerStats};
 
 pub(crate) use model::update_tcp_state_fields;
-pub(crate) use scale::{ScaleFlowEntry, scale_base_ms};
+pub(crate) use scale::ScaleFlowEntry;
 pub(crate) use tcp::{SeqStatus, TcpFlags, TcpSeqTracker, tcp_sequence_len};
 
 /// Build a canonical flow key from a parsed packet.
@@ -72,6 +72,147 @@ mod tests {
     use crate::protocol::{LinkType, parse_packet_with_linktype};
     use std::collections::VecDeque;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn flow_budget_holds_for_constant_and_backward_timestamps() {
+        for deep in [false, true] {
+            let mut tracker = FlowTracker::new(120.0, 2, deep, deep, deep);
+            let mut evictions = Vec::new();
+            for port in 1..=100u16 {
+                let frame =
+                    make_tcp_ethernet_frame([10, 0, 0, 1], [10, 0, 0, 2], port, 80, 1, 0, 2, &[]);
+                let parsed = parse_packet_with_linktype(&frame, LinkType::Ethernet).unwrap();
+                let ts = if port < 50 {
+                    100.0
+                } else {
+                    100.0 - port as f64
+                };
+                tracker.observe_collect(ts, frame.len() as u64, &parsed, &mut evictions);
+                assert!(tracker.len() <= 2);
+            }
+            assert_eq!(tracker.stats().created, 100);
+            assert_eq!(tracker.stats().evicted, 98);
+            assert_eq!(evictions.len(), 98);
+            assert!(
+                evictions
+                    .iter()
+                    .all(|event| event.reason == ExpiredFlowReason::Eviction)
+            );
+            assert_eq!(tracker.maybe_expire(1000.0), 2);
+            // New inserts after timeout cleanup must have a consistent clock.
+            observe_tcp_segment(
+                &mut tracker,
+                1001.0,
+                [10, 0, 0, 1],
+                [10, 0, 0, 2],
+                200,
+                80,
+                1,
+                0,
+                2,
+                &[],
+            );
+            assert_eq!(tracker.len(), 1);
+        }
+    }
+
+    #[test]
+    fn full_and_scale_flows_preserve_early_and_long_range_times() {
+        for deep in [false, true] {
+            let mut tracker = FlowTracker::new(120.0, 100, deep, deep, deep);
+            for (ts, port) in [
+                (100.25, 1000),
+                (90.0, 1001),
+                (80.5, 1001),
+                (5_000_100.125, 1001),
+            ] {
+                observe_tcp_segment(
+                    &mut tracker,
+                    ts,
+                    [10, 0, 0, 1],
+                    [10, 0, 0, 2],
+                    port,
+                    80,
+                    1,
+                    0,
+                    2,
+                    &[],
+                );
+            }
+            let flow = tracker
+                .snapshot()
+                .into_iter()
+                .find(|flow| flow.endpoint_a.port == 1001)
+                .unwrap();
+            assert_eq!(flow.first_seen, 80.5);
+            assert_eq!(flow.last_seen, 5_000_100.125);
+            assert_eq!(flow.duration_secs, 5_000_019.625);
+            assert_eq!(tracker.maybe_expire(5_000_101.0), 1);
+            assert_eq!(tracker.len(), 1);
+        }
+    }
+
+    #[test]
+    fn fin_retransmissions_are_idempotent_in_both_flow_stores() {
+        for deep in [false, true] {
+            let mut tracker = FlowTracker::new(120.0, 100, deep, deep, deep);
+            for ts in [1.0, 1.1, 1.2] {
+                observe_tcp_segment(
+                    &mut tracker,
+                    ts,
+                    [10, 0, 0, 1],
+                    [10, 0, 0, 2],
+                    40000,
+                    80,
+                    1,
+                    0,
+                    0x11,
+                    &[],
+                );
+                assert_eq!(tracker.snapshot()[0].tcp_state, Some(TcpState::FinWait));
+            }
+            for ts in [1.3, 1.4] {
+                observe_tcp_segment(
+                    &mut tracker,
+                    ts,
+                    [10, 0, 0, 2],
+                    [10, 0, 0, 1],
+                    80,
+                    40000,
+                    1,
+                    0,
+                    0x11,
+                    &[],
+                );
+                assert_eq!(tracker.snapshot()[0].tcp_state, Some(TcpState::Closed));
+            }
+            observe_tcp_segment(
+                &mut tracker,
+                1.5,
+                [10, 0, 0, 1],
+                [10, 0, 0, 2],
+                40000,
+                80,
+                1,
+                0,
+                0x14,
+                &[],
+            );
+            observe_tcp_segment(
+                &mut tracker,
+                1.6,
+                [10, 0, 0, 1],
+                [10, 0, 0, 2],
+                40000,
+                80,
+                1,
+                0,
+                0x11,
+                &[],
+            );
+            assert_eq!(tracker.snapshot()[0].tcp_state, Some(TcpState::Reset));
+        }
+    }
 
     fn make_ethernet_arp_frame() -> Vec<u8> {
         let mut frame = vec![
@@ -284,11 +425,9 @@ mod tests {
 
     #[test]
     fn scale_flow_entry_tracks_compact_state_and_deltas() {
-        let time_base_ms = scale_base_ms(1.0);
-        let mut entry = ScaleFlowEntry::new(1.0, FlowProtocol::Tcp, time_base_ms);
+        let mut entry = ScaleFlowEntry::new(1.0, FlowProtocol::Tcp);
         entry.observe(
             2.0,
-            time_base_ms,
             FlowDirection::AtoB,
             128,
             Some(TcpFlags {
@@ -304,8 +443,8 @@ mod tests {
         assert_eq!(entry.web_delta(), 128);
         assert_eq!(entry.tcp_state(), Some(TcpState::SynSent));
         assert_eq!(entry.client(), Some(FlowDirection::AtoB));
-        assert_eq!(entry.first_seen(time_base_ms), 1.0);
-        assert_eq!(entry.last_seen(time_base_ms), 2.0);
+        assert_eq!(entry.first_seen(), 1.0);
+        assert_eq!(entry.last_seen(), 2.0);
 
         entry.mark_stats_reported();
         entry.mark_web_reported();

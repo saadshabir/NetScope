@@ -87,19 +87,8 @@ pub fn open_capture(config: &CaptureConfig) -> Result<Capture<Active>, CaptureEr
         .snaplen(config.snaplen)
         .timeout(config.timeout_ms);
 
-    #[cfg(any(libpcap_1_5_0, windows))]
-    {
-        if config.immediate_mode {
-            cap = cap.immediate_mode(true);
-        }
-    }
-
-    #[cfg(not(any(libpcap_1_5_0, windows)))]
-    {
-        if config.immediate_mode {
-            tracing::debug!("immediate mode requested but not supported by libpcap");
-        }
-    }
+    // The supported libpcap versions expose this API through pcap.
+    cap = cap.immediate_mode(config.immediate_mode);
 
     if let Some(buffer_size_mb) = config.buffer_size_mb {
         let snaplen = config.snaplen.max(0);

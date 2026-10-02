@@ -137,6 +137,8 @@ pub struct OwnedPacket {
 /// Configuration for the pipeline.
 #[derive(Debug, Clone)]
 pub struct PipelineConfig {
+    /// Offline sources expire flows using a capture-time watermark.
+    pub offline: bool,
     /// Number of worker shards (0 = auto-detect from CPU count).
     pub num_workers: usize,
     /// Capacity of each capture → worker channel.
@@ -261,6 +263,7 @@ pub fn spawn(
         let heavy_hitter_top_n = config.heavy_hitter_top_n;
         let buffer_returner = buffer_returner.clone();
         let link_type = config.link_type;
+        let offline = config.offline;
         let running_for_worker = running.clone();
 
         let handle = match thread::Builder::new()
@@ -270,6 +273,7 @@ pub fn spawn(
                     shard_id,
                     link_type,
                     worker::WorkerConfigBundle {
+                        offline,
                         flow_cfg,
                         analysis_cfg,
                         web_cfg,

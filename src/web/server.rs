@@ -59,6 +59,7 @@ pub struct AppState {
     pub tick_ms: u64,
     /// Optional HTTP Basic auth credentials.
     basic_auth: Option<BasicAuthCredentials>,
+    origin_policy: crate::web::origin::DashboardPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +75,7 @@ struct BasicAuthCredentials {
 /// Configuration for the web server.
 #[derive(Debug, Clone)]
 pub struct WebServerConfig {
+    pub allowed_origins: Vec<String>,
     pub bind: String,
     pub port: u16,
     pub tick_ms: u64,
@@ -105,6 +107,7 @@ pub struct WebHandle {
 /// Returns a `WebHandle` the caller uses to push capture events.
 pub fn start(config: WebServerConfig) -> Result<WebHandle, std::io::Error> {
     let WebServerConfig {
+        allowed_origins,
         bind,
         port,
         tick_ms,
@@ -138,6 +141,13 @@ pub fn start(config: WebServerConfig) -> Result<WebHandle, std::io::Error> {
         latest_frame: RwLock::new(None),
         packet_store: RwLock::new(PacketStore::new(packet_buffer)),
         tick_ms,
+        origin_policy: crate::web::origin::DashboardPolicy::new(
+            &bind,
+            listener.local_addr()?.port(),
+            rustls_config.is_some(),
+            &allowed_origins,
+        )
+        .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?,
         basic_auth: auth.map(|auth| BasicAuthCredentials {
             username: auth.username,
             password: auth.password,
@@ -319,6 +329,9 @@ async fn auth_middleware(
     request: Request,
     next: Next,
 ) -> Response {
+    if !state.origin_policy.allows(request.headers(), request.uri()) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     let Some(credentials) = &state.basic_auth else {
         return next.run(request).await;
     };
@@ -635,6 +648,8 @@ mod tests {
             packet_store: RwLock::new(PacketStore::new(8)),
             tick_ms: 1000,
             basic_auth: auth,
+            origin_policy: crate::web::origin::DashboardPolicy::new("127.0.0.1", 8080, false, &[])
+                .unwrap(),
         })
     }
 
@@ -693,6 +708,7 @@ mod tests {
 
     fn ws_upgrade_request() -> Request<Body> {
         Request::builder()
+            .header(header::HOST, "127.0.0.1:8080")
             .uri("/ws")
             .header(header::CONNECTION, "upgrade")
             .header(header::UPGRADE, "websocket")
@@ -703,9 +719,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn foreign_origins_and_hosts_are_rejected_even_with_valid_auth() {
+        let credentials = BasicAuthCredentials {
+            username: "netscope".into(),
+            password: "secret".into(),
+        };
+        for auth in [None, Some(credentials)] {
+            let app = test_router(auth);
+            let mut request = ws_upgrade_request();
+            request
+                .headers_mut()
+                .insert(header::ORIGIN, "http://unrelated.invalid".parse().unwrap());
+            request.headers_mut().insert(
+                header::AUTHORIZATION,
+                format!("Basic {}", BASE64_STANDARD.encode("netscope:secret"))
+                    .parse()
+                    .unwrap(),
+            );
+            assert_eq!(
+                app.clone().oneshot(request).await.unwrap().status(),
+                StatusCode::FORBIDDEN
+            );
+            let request = Request::builder()
+                .uri("/api/health")
+                .header(header::HOST, "attacker.invalid:8080")
+                .body(Body::empty())
+                .unwrap();
+            assert_eq!(
+                app.oneshot(request).await.unwrap().status(),
+                StatusCode::FORBIDDEN
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn websocket_origin_policy_is_enforced_before_the_upgrade() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut state = test_state(None);
+        Arc::get_mut(&mut state).unwrap().origin_policy =
+            crate::web::origin::DashboardPolicy::new("127.0.0.1", addr.port(), false, &[]).unwrap();
+        let app = Router::new()
+            .route("/ws", get(ws_handler))
+            .with_state(state.clone())
+            .layer(middleware::from_fn_with_state(state, auth_middleware));
+        let server = axum_server::from_tcp(listener).unwrap();
+        let task = tokio::spawn(async move {
+            server.serve(app.into_make_service()).await.unwrap();
+        });
+        let url = format!("ws://{addr}/ws");
+        let mut request = url.clone().into_client_request().unwrap();
+        request
+            .headers_mut()
+            .insert("origin", "http://unrelated.invalid".parse().unwrap());
+        match tokio_tungstenite::connect_async(request).await {
+            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+                assert_eq!(response.status().as_u16(), 403)
+            }
+            _ => panic!("foreign origin was not rejected before upgrading"),
+        }
+        for origin in [None, Some(format!("http://{addr}"))] {
+            let mut request = url.clone().into_client_request().unwrap();
+            if let Some(origin) = origin {
+                request
+                    .headers_mut()
+                    .insert("origin", origin.parse().unwrap());
+            }
+            let (mut socket, response) = tokio_tungstenite::connect_async(request).await.unwrap();
+            assert_eq!(response.status().as_u16(), 101);
+            socket.close(None).await.unwrap();
+        }
+        task.abort();
+    }
+
+    #[tokio::test]
     async fn health_without_auth_config_is_public() {
         let app = test_router(None);
         let request = Request::builder()
+            .header(header::HOST, "127.0.0.1:8080")
             .uri("/api/health")
             .body(Body::empty())
             .expect("request should build");
@@ -722,6 +815,7 @@ mod tests {
             password: "secret".into(),
         }));
         let request = Request::builder()
+            .header(header::HOST, "127.0.0.1:8080")
             .uri("/api/health")
             .body(Body::empty())
             .expect("request should build");
@@ -746,6 +840,7 @@ mod tests {
         }));
         let token = BASE64_STANDARD.encode("netscope:secret");
         let request = Request::builder()
+            .header(header::HOST, "127.0.0.1:8080")
             .uri("/api/health")
             .header(header::AUTHORIZATION, format!("Basic {}", token))
             .body(Body::empty())
@@ -760,6 +855,7 @@ mod tests {
     async fn metrics_without_auth_config_is_public() {
         let app = test_router(None);
         let request = Request::builder()
+            .header(header::HOST, "127.0.0.1:8080")
             .uri("/metrics")
             .body(Body::empty())
             .expect("request should build");
@@ -783,6 +879,7 @@ mod tests {
             password: "secret".into(),
         }));
         let request = Request::builder()
+            .header(header::HOST, "127.0.0.1:8080")
             .uri("/metrics")
             .body(Body::empty())
             .expect("request should build");
@@ -800,6 +897,7 @@ mod tests {
         }));
         let token = BASE64_STANDARD.encode("netscope:secret");
         let request = Request::builder()
+            .header(header::HOST, "127.0.0.1:8080")
             .uri("/metrics")
             .header(header::AUTHORIZATION, format!("Basic {}", token))
             .body(Body::empty())

@@ -1,20 +1,19 @@
 use ahash::{AHashMap, AHashSet};
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::net::IpAddr;
 
 use crate::protocol::{NetworkHeader, ParsedPacket, TransportHeader};
 
 use super::{
     CompactFlowKey, Endpoint, ExpiredFlowEvent, ExpiredFlowReason, FlowDelta, FlowEntry, FlowKey,
-    FlowKeyV4, FlowKeyV6, FlowProtocol, FlowSnapshot, ScaleFlowEntry, TcpFlags, scale_base_ms,
-    tcp_sequence_len,
+    FlowKeyV4, FlowKeyV6, FlowProtocol, FlowSnapshot, ScaleFlowEntry, TcpFlags, tcp_sequence_len,
 };
 
 #[derive(Debug)]
 enum FlowStore {
     Full(AHashMap<FlowKey, FlowEntry>),
     Scale {
-        time_base_ms: u64,
         flows_v4: AHashMap<FlowKeyV4, ScaleFlowEntry>,
         flows_v6: AHashMap<FlowKeyV6, ScaleFlowEntry>,
     },
@@ -32,6 +31,8 @@ pub struct FlowTracker {
     timeout_secs: f64,
     max_flows: usize,
     last_prune: f64,
+    eviction_clock: VecDeque<CompactFlowKey>,
+    referenced: AHashSet<CompactFlowKey>,
     track_rtt: bool,
     track_retrans: bool,
     track_out_of_order: bool,
@@ -63,7 +64,6 @@ impl FlowTracker {
         let scale_mode = !track_rtt && !track_retrans && !track_out_of_order;
         let store = if scale_mode {
             FlowStore::Scale {
-                time_base_ms: 0,
                 flows_v4: AHashMap::with_capacity(initial_capacity),
                 flows_v6: AHashMap::with_capacity(initial_capacity / 8),
             }
@@ -76,6 +76,8 @@ impl FlowTracker {
             timeout_secs,
             max_flows,
             last_prune: 0.0,
+            eviction_clock: VecDeque::new(),
+            referenced: AHashSet::new(),
             track_rtt,
             track_retrans,
             track_out_of_order,
@@ -119,14 +121,7 @@ impl FlowTracker {
 
         let previous_len = self.len();
         match &mut self.store {
-            FlowStore::Scale {
-                time_base_ms,
-                flows_v4,
-                ..
-            } => {
-                if *time_base_ms == 0 {
-                    *time_base_ms = scale_base_ms(0.0);
-                }
+            FlowStore::Scale { flows_v4, .. } => {
                 for i in 0..count as u32 {
                     let src_ip = ip_from_index(10, ((i >> 16) & 0xFF) as u8, i);
                     let dst_ip = ip_from_index(172, 16, i);
@@ -134,10 +129,10 @@ impl FlowTracker {
                     let dst_port = 80;
                     let (key, _dir) =
                         FlowKeyV4::new(FlowProtocol::Tcp, src_ip, src_port, dst_ip, dst_port);
-                    let base = *time_base_ms;
+
                     flows_v4
                         .entry(key)
-                        .or_insert_with(|| ScaleFlowEntry::new(0.0, FlowProtocol::Tcp, base));
+                        .or_insert_with(|| ScaleFlowEntry::new(0.0, FlowProtocol::Tcp));
                 }
             }
             FlowStore::Full(flows) => {
@@ -166,6 +161,27 @@ impl FlowTracker {
 
     #[inline]
     pub fn observe(&mut self, ts: f64, wire_len: u64, packet: &ParsedPacket<'_>) {
+        self.observe_inner(ts, wire_len, packet, None);
+    }
+
+    /// Observe a packet and collect capacity evictions immediately.
+    pub fn observe_collect(
+        &mut self,
+        ts: f64,
+        wire_len: u64,
+        packet: &ParsedPacket<'_>,
+        out: &mut Vec<ExpiredFlowEvent>,
+    ) {
+        self.observe_inner(ts, wire_len, packet, Some(out));
+    }
+
+    fn observe_inner(
+        &mut self,
+        ts: f64,
+        wire_len: u64,
+        packet: &ParsedPacket<'_>,
+        mut out: Option<&mut Vec<ExpiredFlowEvent>>,
+    ) {
         let (ips, skip_flow) = match &packet.network {
             Some(NetworkHeader::Ipv4(hdr)) => {
                 let skip = hdr.fragment_offset() != 0;
@@ -209,7 +225,24 @@ impl FlowTracker {
             _ => return,
         };
 
-        let previous_len = self.len();
+        let compact_key = match ips {
+            ParsedFlowIps::V4(src, dst) => {
+                CompactFlowKey::V4(FlowKeyV4::new(protocol, src, src_port, dst, dst_port).0)
+            }
+            ParsedFlowIps::V6(src, dst) => {
+                CompactFlowKey::V6(FlowKeyV6::new(protocol, src, src_port, dst, dst_port).0)
+            }
+        };
+        let is_new = !self.contains_compact_key(compact_key);
+        if self.max_flows > 0 {
+            if is_new {
+                while self.len() >= self.max_flows {
+                    self.evict_one(ts, out.as_deref_mut());
+                }
+                self.eviction_clock.push_back(compact_key);
+            }
+            self.referenced.insert(compact_key);
+        }
         match &mut self.store {
             FlowStore::Full(flows) => {
                 let (src_ip, dst_ip) = match ips {
@@ -247,39 +280,78 @@ impl FlowTracker {
                     );
                 }
             }
-            FlowStore::Scale {
-                time_base_ms,
-                flows_v4,
-                flows_v6,
-            } => {
-                if *time_base_ms == 0 {
-                    *time_base_ms = scale_base_ms(ts);
+            FlowStore::Scale { flows_v4, flows_v6 } => match ips {
+                ParsedFlowIps::V4(src_ip, dst_ip) => {
+                    let (key, direction) =
+                        FlowKeyV4::new(protocol, src_ip, src_port, dst_ip, dst_port);
+                    let entry = flows_v4
+                        .entry(key)
+                        .or_insert_with(|| ScaleFlowEntry::new(ts, protocol));
+                    entry.observe(ts, direction, wire_len, flags);
                 }
-                let base = *time_base_ms;
-
-                match ips {
-                    ParsedFlowIps::V4(src_ip, dst_ip) => {
-                        let (key, direction) =
-                            FlowKeyV4::new(protocol, src_ip, src_port, dst_ip, dst_port);
-                        let entry = flows_v4
-                            .entry(key)
-                            .or_insert_with(|| ScaleFlowEntry::new(ts, protocol, base));
-                        entry.observe(ts, base, direction, wire_len, flags);
-                    }
-                    ParsedFlowIps::V6(src_ip, dst_ip) => {
-                        let (key, direction) =
-                            FlowKeyV6::new(protocol, src_ip, src_port, dst_ip, dst_port);
-                        let entry = flows_v6
-                            .entry(key)
-                            .or_insert_with(|| ScaleFlowEntry::new(ts, protocol, base));
-                        entry.observe(ts, base, direction, wire_len, flags);
-                    }
+                ParsedFlowIps::V6(src_ip, dst_ip) => {
+                    let (key, direction) =
+                        FlowKeyV6::new(protocol, src_ip, src_port, dst_ip, dst_port);
+                    let entry = flows_v6
+                        .entry(key)
+                        .or_insert_with(|| ScaleFlowEntry::new(ts, protocol));
+                    entry.observe(ts, direction, wire_len, flags);
                 }
-            }
+            },
         }
 
-        if self.len() > previous_len {
+        if is_new {
             self.stats.created = self.stats.created.saturating_add(1);
+        }
+    }
+
+    fn contains_compact_key(&self, key: CompactFlowKey) -> bool {
+        match (&self.store, key) {
+            (FlowStore::Full(flows), key) => flows.contains_key(&key.to_flow_key()),
+            (FlowStore::Scale { flows_v4, .. }, CompactFlowKey::V4(key)) => {
+                flows_v4.contains_key(&key)
+            }
+            (FlowStore::Scale { flows_v6, .. }, CompactFlowKey::V6(key)) => {
+                flows_v6.contains_key(&key)
+            }
+        }
+    }
+
+    // A bounded second-chance clock keeps recently used flows without sorting
+    // the entire table for every insert. Each reference buys one extra pass.
+    fn evict_one(&mut self, ts: f64, out: Option<&mut Vec<ExpiredFlowEvent>>) {
+        loop {
+            let key = self
+                .eviction_clock
+                .pop_front()
+                .expect("nonempty bounded flow clock");
+            if self.referenced.remove(&key) {
+                self.eviction_clock.push_back(key);
+                continue;
+            }
+            let flow_key = key.to_flow_key();
+            let snapshot = match (&mut self.store, key) {
+                (FlowStore::Full(flows), _) => flows
+                    .remove(&flow_key)
+                    .map(|entry| FlowSnapshot::from_entry(&flow_key, &entry)),
+                (FlowStore::Scale { flows_v4, .. }, CompactFlowKey::V4(key)) => flows_v4
+                    .remove(&key)
+                    .map(|entry| FlowSnapshot::from_scale_entry(&flow_key, &entry)),
+                (FlowStore::Scale { flows_v6, .. }, CompactFlowKey::V6(key)) => flows_v6
+                    .remove(&key)
+                    .map(|entry| FlowSnapshot::from_scale_entry(&flow_key, &entry)),
+            };
+            if let Some(flow) = snapshot {
+                self.stats.evicted = self.stats.evicted.saturating_add(1);
+                if let Some(out) = out {
+                    out.push(ExpiredFlowEvent {
+                        ts,
+                        reason: ExpiredFlowReason::Eviction,
+                        flow,
+                    });
+                }
+                return;
+            }
         }
     }
 
@@ -368,23 +440,19 @@ impl FlowTracker {
                     }
                 }
             }
-            FlowStore::Scale {
-                time_base_ms,
-                flows_v4,
-                flows_v6,
-            } => {
+            FlowStore::Scale { flows_v4, flows_v6 } => {
                 if self.timeout_secs > 0.0 {
                     let mut timeout_keys: Vec<CompactFlowKey> =
                         Vec::with_capacity(flows_v4.len() + flows_v6.len());
                     timeout_keys.extend(flows_v4.iter().filter_map(|(key, entry)| {
-                        if now - entry.last_seen(*time_base_ms) > self.timeout_secs {
+                        if now - entry.last_seen() > self.timeout_secs {
                             Some(CompactFlowKey::V4(*key))
                         } else {
                             None
                         }
                     }));
                     timeout_keys.extend(flows_v6.iter().filter_map(|(key, entry)| {
-                        if now - entry.last_seen(*time_base_ms) > self.timeout_secs {
+                        if now - entry.last_seen() > self.timeout_secs {
                             Some(CompactFlowKey::V6(*key))
                         } else {
                             None
@@ -399,11 +467,7 @@ impl FlowTracker {
                                     let flow_key = CompactFlowKey::V4(v4).to_flow_key();
                                     record_expired(
                                         ExpiredFlowReason::Timeout,
-                                        FlowSnapshot::from_scale_entry(
-                                            &flow_key,
-                                            &entry,
-                                            *time_base_ms,
-                                        ),
+                                        FlowSnapshot::from_scale_entry(&flow_key, &entry),
                                     );
                                 }
                             }
@@ -413,11 +477,7 @@ impl FlowTracker {
                                     let flow_key = CompactFlowKey::V6(v6).to_flow_key();
                                     record_expired(
                                         ExpiredFlowReason::Timeout,
-                                        FlowSnapshot::from_scale_entry(
-                                            &flow_key,
-                                            &entry,
-                                            *time_base_ms,
-                                        ),
+                                        FlowSnapshot::from_scale_entry(&flow_key, &entry),
                                     );
                                 }
                             }
@@ -427,20 +487,18 @@ impl FlowTracker {
 
                 let total_len = flows_v4.len() + flows_v6.len();
                 if self.max_flows > 0 && total_len > self.max_flows {
-                    let mut entries: Vec<(CompactFlowKey, u64)> = Vec::with_capacity(total_len);
-                    entries.extend(flows_v4.iter().map(|(key, entry)| {
-                        (
-                            CompactFlowKey::V4(*key),
-                            entry.last_seen_sort_key(*time_base_ms),
-                        )
-                    }));
-                    entries.extend(flows_v6.iter().map(|(key, entry)| {
-                        (
-                            CompactFlowKey::V6(*key),
-                            entry.last_seen_sort_key(*time_base_ms),
-                        )
-                    }));
-                    entries.sort_unstable_by(|a, b| a.1.cmp(&b.1));
+                    let mut entries: Vec<(CompactFlowKey, f64)> = Vec::with_capacity(total_len);
+                    entries.extend(
+                        flows_v4
+                            .iter()
+                            .map(|(key, entry)| (CompactFlowKey::V4(*key), entry.last_seen())),
+                    );
+                    entries.extend(
+                        flows_v6
+                            .iter()
+                            .map(|(key, entry)| (CompactFlowKey::V6(*key), entry.last_seen())),
+                    );
+                    entries.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
                     let excess = total_len - self.max_flows;
                     for (key, _) in entries.into_iter().take(excess) {
                         match key {
@@ -450,11 +508,7 @@ impl FlowTracker {
                                     let flow_key = CompactFlowKey::V4(v4).to_flow_key();
                                     record_expired(
                                         ExpiredFlowReason::Eviction,
-                                        FlowSnapshot::from_scale_entry(
-                                            &flow_key,
-                                            &entry,
-                                            *time_base_ms,
-                                        ),
+                                        FlowSnapshot::from_scale_entry(&flow_key, &entry),
                                     );
                                 }
                             }
@@ -464,11 +518,7 @@ impl FlowTracker {
                                     let flow_key = CompactFlowKey::V6(v6).to_flow_key();
                                     record_expired(
                                         ExpiredFlowReason::Eviction,
-                                        FlowSnapshot::from_scale_entry(
-                                            &flow_key,
-                                            &entry,
-                                            *time_base_ms,
-                                        ),
+                                        FlowSnapshot::from_scale_entry(&flow_key, &entry),
                                     );
                                 }
                             }
@@ -478,6 +528,13 @@ impl FlowTracker {
             }
         }
 
+        if removed > 0 {
+            let mut clock = std::mem::take(&mut self.eviction_clock);
+            clock.retain(|key| self.contains_compact_key(*key));
+            let active: AHashSet<_> = clock.iter().copied().collect();
+            self.referenced.retain(|key| active.contains(key));
+            self.eviction_clock = clock;
+        }
         removed
     }
 
@@ -619,11 +676,7 @@ impl FlowTracker {
                 }
                 result
             }
-            FlowStore::Scale {
-                time_base_ms,
-                flows_v4,
-                flows_v6,
-            } => {
+            FlowStore::Scale { flows_v4, flows_v6 } => {
                 let mut deltas: Vec<(CompactFlowKey, u64)> = Vec::new();
                 deltas.extend(flows_v4.iter().filter_map(|(key, entry)| {
                     let delta = entry.web_delta();
@@ -656,8 +709,7 @@ impl FlowTracker {
                             if let Some(entry) = flows_v4.get_mut(&key) {
                                 entry.mark_web_reported();
                                 let flow_key = CompactFlowKey::V4(key).to_flow_key();
-                                let snap =
-                                    FlowSnapshot::from_scale_entry(&flow_key, entry, *time_base_ms);
+                                let snap = FlowSnapshot::from_scale_entry(&flow_key, entry);
                                 result.push((
                                     FlowDelta {
                                         key: flow_key,
@@ -671,8 +723,7 @@ impl FlowTracker {
                             if let Some(entry) = flows_v6.get_mut(&key) {
                                 entry.mark_web_reported();
                                 let flow_key = CompactFlowKey::V6(key).to_flow_key();
-                                let snap =
-                                    FlowSnapshot::from_scale_entry(&flow_key, entry, *time_base_ms);
+                                let snap = FlowSnapshot::from_scale_entry(&flow_key, entry);
                                 result.push((
                                     FlowDelta {
                                         key: flow_key,
@@ -696,19 +747,16 @@ impl FlowTracker {
                 .map(|(key, entry)| FlowSnapshot::from_entry(key, entry))
                 .collect(),
             FlowStore::Scale {
-                time_base_ms,
-                flows_v4,
-                flows_v6,
-                ..
+                flows_v4, flows_v6, ..
             } => {
                 let mut out = Vec::with_capacity(flows_v4.len() + flows_v6.len());
                 out.extend(flows_v4.iter().map(|(key, entry)| {
                     let flow_key = CompactFlowKey::V4(*key).to_flow_key();
-                    FlowSnapshot::from_scale_entry(&flow_key, entry, *time_base_ms)
+                    FlowSnapshot::from_scale_entry(&flow_key, entry)
                 }));
                 out.extend(flows_v6.iter().map(|(key, entry)| {
                     let flow_key = CompactFlowKey::V6(*key).to_flow_key();
-                    FlowSnapshot::from_scale_entry(&flow_key, entry, *time_base_ms)
+                    FlowSnapshot::from_scale_entry(&flow_key, entry)
                 }));
                 out
             }
@@ -777,11 +825,7 @@ impl FlowTracker {
 
                 out
             }
-            FlowStore::Scale {
-                time_base_ms,
-                flows_v4,
-                flows_v6,
-            } => {
+            FlowStore::Scale { flows_v4, flows_v6 } => {
                 let mut seen = AHashSet::with_capacity(keys.len());
                 let mut out: Vec<(CompactFlowKey, u64, FlowSnapshot)> =
                     Vec::with_capacity(keys.len());
@@ -800,11 +844,7 @@ impl FlowTracker {
                                     out.push((
                                         CompactFlowKey::V4(*k),
                                         delta,
-                                        FlowSnapshot::from_scale_entry(
-                                            &flow_key,
-                                            entry,
-                                            *time_base_ms,
-                                        ),
+                                        FlowSnapshot::from_scale_entry(&flow_key, entry),
                                     ));
                                 }
                             }
@@ -817,11 +857,7 @@ impl FlowTracker {
                                     out.push((
                                         CompactFlowKey::V6(*k),
                                         delta,
-                                        FlowSnapshot::from_scale_entry(
-                                            &flow_key,
-                                            entry,
-                                            *time_base_ms,
-                                        ),
+                                        FlowSnapshot::from_scale_entry(&flow_key, entry),
                                     ));
                                 }
                             }

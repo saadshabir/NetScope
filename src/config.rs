@@ -254,6 +254,8 @@ impl Default for PortScanConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WebConfig {
+    /// Additional trusted dashboard origins, including scheme and port.
+    pub allowed_origins: Vec<String>,
     /// Enable the web dashboard.
     pub enabled: bool,
     /// Address to bind the HTTP server to.
@@ -306,6 +308,7 @@ pub struct WebAuthConfig {
 impl Default for WebConfig {
     fn default() -> Self {
         WebConfig {
+            allowed_origins: Vec::new(),
             enabled: false,
             bind: "127.0.0.1".into(),
             port: 8080,
@@ -328,6 +331,12 @@ impl WebConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        crate::web::origin::validate(
+            &self.bind,
+            self.port,
+            self.tls.enabled,
+            &self.allowed_origins,
+        )?;
         if self.tls.enabled {
             if self.tls.cert_path.is_none() {
                 return Err("web.tls.cert_path is required when web.tls.enabled = true".into());

@@ -63,6 +63,8 @@ unique_hosts_threshold = 10
 cooldown_secs = 30.0
 
 [web]
+# Additional trusted endpoints for remote access; include scheme and port.
+allowed_origins = []
 enabled = false
 bind = "127.0.0.1"
 port = 8080

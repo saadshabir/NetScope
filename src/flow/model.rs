@@ -37,6 +37,8 @@ pub struct FlowEntry {
     #[serde(skip)]
     pub(crate) last_report_bytes_web: u64,
     #[serde(skip)]
+    fin_seen: u8,
+    #[serde(skip)]
     a_to_b_seq: TcpSeqTracker,
     #[serde(skip)]
     b_to_a_seq: TcpSeqTracker,
@@ -64,6 +66,7 @@ impl FlowEntry {
             rtt_samples: 0,
             last_report_bytes_stats: 0,
             last_report_bytes_web: 0,
+            fin_seen: 0,
             a_to_b_seq: TcpSeqTracker::new(),
             b_to_a_seq: TcpSeqTracker::new(),
         }
@@ -77,7 +80,8 @@ impl FlowEntry {
         bytes: u64,
         flags: Option<TcpFlags>,
     ) {
-        self.last_seen = ts;
+        self.first_seen = self.first_seen.min(ts);
+        self.last_seen = self.last_seen.max(ts);
         match direction {
             FlowDirection::AtoB => {
                 self.packets_a_to_b += 1;
@@ -188,13 +192,20 @@ impl FlowEntry {
     }
 
     pub(crate) fn update_tcp_state(&mut self, flags: TcpFlags, direction: FlowDirection) {
-        update_tcp_state_fields(&mut self.tcp_state, &mut self.client, flags, direction);
+        update_tcp_state_fields(
+            &mut self.tcp_state,
+            &mut self.client,
+            &mut self.fin_seen,
+            flags,
+            direction,
+        );
     }
 }
 
 pub(crate) fn update_tcp_state_fields(
     tcp_state: &mut Option<TcpState>,
     client: &mut Option<FlowDirection>,
+    fin_seen: &mut u8,
     flags: TcpFlags,
     direction: FlowDirection,
 ) {
@@ -206,6 +217,7 @@ pub(crate) fn update_tcp_state_fields(
         if client.is_none() {
             *client = Some(direction);
         }
+        *fin_seen = 0;
         *tcp_state = Some(TcpState::SynSent);
         return;
     }
@@ -214,15 +226,18 @@ pub(crate) fn update_tcp_state_fields(
         return;
     }
     if flags.fin {
-        match tcp_state {
-            Some(TcpState::FinWait) => {
-                // Second FIN seen (other direction) -- move to Closed
-                *tcp_state = Some(TcpState::Closed);
-            }
-            _ => {
-                *tcp_state = Some(TcpState::FinWait);
-            }
+        if matches!(tcp_state, Some(TcpState::Reset | TcpState::Closed)) {
+            return;
         }
+        *fin_seen |= match direction {
+            FlowDirection::AtoB => 1,
+            FlowDirection::BtoA => 2,
+        };
+        *tcp_state = Some(if *fin_seen == 3 {
+            TcpState::Closed
+        } else {
+            TcpState::FinWait
+        });
         return;
     }
     if flags.ack {
@@ -330,13 +345,9 @@ impl FlowSnapshot {
         }
     }
 
-    pub(crate) fn from_scale_entry(
-        key: &FlowKey,
-        entry: &ScaleFlowEntry,
-        time_base_ms: u64,
-    ) -> Self {
-        let first_seen = entry.first_seen(time_base_ms);
-        let last_seen = entry.last_seen(time_base_ms);
+    pub(crate) fn from_scale_entry(key: &FlowKey, entry: &ScaleFlowEntry) -> Self {
+        let first_seen = entry.first_seen();
+        let last_seen = entry.last_seen();
         let duration = (last_seen - first_seen).max(0.0);
         let bytes_total = entry.total_bytes();
         let packets_total = entry.total_packets();

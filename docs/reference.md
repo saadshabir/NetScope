@@ -41,7 +41,9 @@ Use an expired-flow sink together with a final export to retain removed and rema
 
 Flow JSON is an array of records with `protocol`, `endpoint_a`/`endpoint_b` (`ip` and `port`), `first_seen`, `last_seen`, `duration_secs`, directional and total packet/byte counts, `avg_bps`, and TCP tracking fields (`tcp_state`, `client`, retransmission/order counts, RTT samples). CSV uses the same data as one row per flow. Flow endpoint order is canonical; the A-to-B and B-to-A counts preserve direction. TCP state and tracking values are inferred from observed packets, not stream reassembly. Scale mode keeps RTT values null and retransmission/order counters at zero because those analyses are disabled. CSV is emitted as plain comma-separated numeric, enum, and IP fields without quoting.
 
-`first_seen` and `last_seen` are Unix seconds from capture timestamps; expired-record `ts` is the removal time in Unix seconds. Flow byte counts use original frame wire lengths, including headers, rather than captured payload sizes. `avg_bps` is bits per second over the observed flow duration and is zero for a zero-duration flow. `--flow-timeout-s 0` disables timeout removal, while `--max-flows 0` disables budget eviction. See [processing modes](design.md#processing-modes) for expiry timing.
+Input PCAPs, the config file, TLS/auth files, and all outputs must have distinct file identities. Validation rejects output aliases through relative paths, symlinks, hard links, and the rotated PCAP filename namespace before opening writers.
+
+`first_seen` and `last_seen` are Unix seconds from the earliest and latest capture timestamps; expired-record `ts` is the removal time in Unix seconds. Flow byte counts use original frame wire lengths, including headers, rather than captured payload sizes. `avg_bps` is bits per second over the observed flow duration and is zero for a zero-duration flow. `--flow-timeout-s 0` disables timeout removal, while `--max-flows 0` disables budget eviction. See [processing modes](design.md#processing-modes) for expiry timing.
 
 Alert JSONL schema version 1 includes `ts`, `kind`, optional source/target addresses and target port, `window_secs`, configured `thresholds`, observed counts, and a description. The threshold and observed objects use `syn_count`, `unique_sources`, `unique_ports`, and `unique_hosts`; fields that do not apply to that alert kind are null.
 
@@ -89,13 +91,14 @@ Capture metrics update on dashboard ticks; they can lag behind packet processing
 
 ## Remote dashboard
 
-Save this as `dashboard.toml`, using existing PEM certificate/key files and a password file readable by NetScope:
+Save this as `dashboard.toml`, replacing `capture.example` with the hostname or address used in your browser, and using existing PEM certificate/key files and a password file readable by NetScope:
 
 ```toml
 [web]
 enabled = true
 bind = "0.0.0.0"
 port = 8443
+allowed_origins = ["https://capture.example:8443"]
 
 [web.tls]
 enabled = true

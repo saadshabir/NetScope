@@ -7,67 +7,20 @@ pub(crate) struct ScaleFlowEntry {
     pub(crate) bytes_b_to_a: u64,
     stats_report_total: u64,
     web_report_total: u64,
-    first_seen_ms: u32,
-    last_seen_ms: u32,
+    first_seen_ts: f64,
+    last_seen_ts: f64,
     pub(crate) packets_a_to_b: u32,
     pub(crate) packets_b_to_a: u32,
-    first_seen_sub_ms_us: u16,
-    last_seen_sub_ms_us: u16,
+    fin_seen: u8,
     tcp_state: u8,
     client: u8,
-    _pad: [u8; 2],
+    _pad: [u8; 5],
 }
 
 const SCALE_TCP_STATE_NONE: u8 = 7;
 
-#[inline]
-pub(crate) fn scale_base_ms(ts: f64) -> u64 {
-    if ts.is_finite() && ts > 0.0 {
-        (ts * 1000.0).floor().min(u64::MAX as f64) as u64
-    } else {
-        0
-    }
-}
-
-#[inline]
-fn scale_abs_us(ts: f64) -> u64 {
-    if ts.is_finite() && ts > 0.0 {
-        (ts * 1_000_000.0).round().min(u64::MAX as f64) as u64
-    } else {
-        0
-    }
-}
-
-#[inline]
-fn scale_encode_ts(ts: f64, time_base_ms: u64) -> (u32, u16) {
-    let abs_us = scale_abs_us(ts);
-    let base_us = time_base_ms.saturating_mul(1000);
-    let offset_us = abs_us.saturating_sub(base_us);
-    let offset_ms = (offset_us / 1000).min(u32::MAX as u64) as u32;
-    let sub_ms_us = (offset_us % 1000) as u16;
-    (offset_ms, sub_ms_us)
-}
-
-#[inline]
-fn scale_decode_ts(time_base_ms: u64, offset_ms: u32, sub_ms_us: u16) -> f64 {
-    let total_us = time_base_ms
-        .saturating_mul(1000)
-        .saturating_add(offset_ms as u64 * 1000)
-        .saturating_add(sub_ms_us as u64);
-    total_us as f64 / 1_000_000.0
-}
-
-#[inline]
-fn scale_sort_key_us(time_base_ms: u64, offset_ms: u32, sub_ms_us: u16) -> u64 {
-    time_base_ms
-        .saturating_mul(1000)
-        .saturating_add(offset_ms as u64 * 1000)
-        .saturating_add(sub_ms_us as u64)
-}
-
 impl ScaleFlowEntry {
-    pub(crate) fn new(ts: f64, protocol: FlowProtocol, time_base_ms: u64) -> Self {
-        let (first_seen_ms, first_seen_sub_ms_us) = scale_encode_ts(ts, time_base_ms);
+    pub(crate) fn new(ts: f64, protocol: FlowProtocol) -> Self {
         let tcp_state = match protocol {
             FlowProtocol::Tcp => Some(TcpState::Unknown),
             FlowProtocol::Udp => None,
@@ -77,15 +30,14 @@ impl ScaleFlowEntry {
             bytes_b_to_a: 0,
             stats_report_total: 0,
             web_report_total: 0,
-            first_seen_ms,
-            last_seen_ms: first_seen_ms,
+            first_seen_ts: ts,
+            last_seen_ts: ts,
             packets_a_to_b: 0,
             packets_b_to_a: 0,
-            first_seen_sub_ms_us,
-            last_seen_sub_ms_us: first_seen_sub_ms_us,
+            fin_seen: 0,
             tcp_state: Self::encode_tcp_state(tcp_state),
             client: Self::encode_client(None),
-            _pad: [0; 2],
+            _pad: [0; 5],
         }
     }
 
@@ -93,14 +45,12 @@ impl ScaleFlowEntry {
     pub(crate) fn observe(
         &mut self,
         ts: f64,
-        time_base_ms: u64,
         direction: FlowDirection,
         bytes: u64,
         flags: Option<TcpFlags>,
     ) {
-        let (last_seen_ms, last_seen_sub_ms_us) = scale_encode_ts(ts, time_base_ms);
-        self.last_seen_ms = last_seen_ms;
-        self.last_seen_sub_ms_us = last_seen_sub_ms_us;
+        self.first_seen_ts = self.first_seen_ts.min(ts);
+        self.last_seen_ts = self.last_seen_ts.max(ts);
         match direction {
             FlowDirection::AtoB => {
                 self.packets_a_to_b = self.packets_a_to_b.saturating_add(1);
@@ -114,7 +64,13 @@ impl ScaleFlowEntry {
         if let Some(flags) = flags {
             let mut tcp_state = self.tcp_state();
             let mut client = self.client();
-            update_tcp_state_fields(&mut tcp_state, &mut client, flags, direction);
+            update_tcp_state_fields(
+                &mut tcp_state,
+                &mut client,
+                &mut self.fin_seen,
+                flags,
+                direction,
+            );
             self.set_tcp_state(tcp_state);
             self.set_client(client);
         }
@@ -151,18 +107,13 @@ impl ScaleFlowEntry {
     }
 
     #[inline]
-    pub(crate) fn first_seen(&self, time_base_ms: u64) -> f64 {
-        scale_decode_ts(time_base_ms, self.first_seen_ms, self.first_seen_sub_ms_us)
+    pub(crate) fn first_seen(&self) -> f64 {
+        self.first_seen_ts
     }
 
     #[inline]
-    pub(crate) fn last_seen(&self, time_base_ms: u64) -> f64 {
-        scale_decode_ts(time_base_ms, self.last_seen_ms, self.last_seen_sub_ms_us)
-    }
-
-    #[inline]
-    pub(crate) fn last_seen_sort_key(&self, time_base_ms: u64) -> u64 {
-        scale_sort_key_us(time_base_ms, self.last_seen_ms, self.last_seen_sub_ms_us)
+    pub(crate) fn last_seen(&self) -> f64 {
+        self.last_seen_ts
     }
 
     #[inline]

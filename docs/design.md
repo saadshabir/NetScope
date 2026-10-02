@@ -20,9 +20,9 @@ flowchart LR
 
 Inline mode owns one flow table and one global anomaly detector. Pipeline mode routes both directions of a flow to the same worker, then merges worker summaries at shutdown. Offline reads block when queues fill, so file input is processed with backpressure. Live capture dispatch remains nonblocking; queue-full frames are counted as application dispatch drops. A capture PCAP is written before pipeline dispatch and can therefore contain frames absent from worker-side flows.
 
-`flow.max_flows` is a total pipeline budget split among workers. A busy shard may evict flows while another has spare quota, and pruning occurs at most once per second, so a burst can temporarily exceed a shard's share. If the budget is below the requested worker count, NetScope reduces the active worker count so each shard receives a positive quota.
+`flow.max_flows` is a total pipeline budget split among workers. A busy shard may evict flows while another has spare quota, and capacity is enforced before every new-flow insertion. A bounded second-chance clock evicts flows when a shard fills; timeout cleanup is separate and runs at most once per capture-time second. If the budget is below the requested worker count, NetScope reduces the active worker count so each shard receives a positive quota.
 
-Inline offline flow expiry uses packet timestamps. Pipeline workers also prune against the current wall clock on idle ticks, even for offline input; an older trace can therefore lose retained flows if a worker becomes idle during a longer run. For offline investigations that need capture-time expiry, use inline mode. To disable timeout removal in either mode, use `--flow-timeout-s 0`; the flow budget still applies.
+Both inline and pipeline offline expiry use a monotonic capture-time watermark. Idle worker ticks keep that watermark and do not compare historical packets with today's wall clock. Flow timestamps retain the earliest and latest observations, including out-of-order packets and captures spanning more than 50 days. Live workers also expire idle flows against wall time. To disable timeout removal in either mode, use `--flow-timeout-s 0`; the flow budget still applies.
 
 Pipeline mode rejects enabled anomaly detection before opening the source. The router hashes the full canonical flow tuple, so sources targeting one destination may reach different shards; per-worker thresholds would change the detector's meaning.
 
@@ -47,7 +47,9 @@ The final run summary distinguishes frames read, packets parsed, network and tra
 The two detectors are configurable heuristics, not signature-based intrusion detection:
 
 - **SYN flood:** counts initial TCP SYN observations in a sliding time window and requires both the configured SYN count and unique-source threshold for a target.
-- **Port scan:** counts distinct destination ports and hosts observed from a source within its configured window; either configured unique-target threshold can fire the alert.
+- **Port scan:** counts distinct destination ports and hosts observed from a source within its configured window; either positive unique-target threshold can fire the alert. Setting one threshold to zero disables that criterion.
+
+SYN counts update incrementally; repeated SYNs with the same timestamp and source share one counted record. Scan targets keep only their latest timestamp. Each detector admits at most 4,096 keys and 65,536 records, with at most 4,096 timestamp/source records per SYN target or 4,096 distinct values per scan dimension. Full per-key windows discard their oldest evidence; global saturation blocks new records or keys until expiry frees space. Saturation can miss alerts, so thresholds above the retained evidence limit should be avoided.
 
 Each detector has a per-key cooldown. Expired observations and cooldowns are pruned even when a key becomes inactive. Out-of-order capture timestamps use a monotonic event-time watermark so state does not move backward. A benign scanner, inventory check, or traffic burst may meet a threshold; a PCAP alone cannot establish intent, service impact, or whether a handshake completed.
 
@@ -55,7 +57,7 @@ Each detector has a per-key cooldown. Expired observations and cooldowns are pru
 
 The optional dashboard runs in a dedicated server thread and consumes inline updates or aggregated pipeline frames. It offers `/`, `/ws`, `/api/health`, and `/metrics`. Packet samples are capture-wide, while detail data is kept in a bounded ring buffer. `sample_rate = 0` disables packet samples without disabling stats or alerts. Chart.js is vendored so the dashboard works offline; keep its license alongside the asset.
 
-The server defaults to `127.0.0.1`. For remote access, enable TLS and authentication as shown in [Reference](reference.md#remote-dashboard). Basic auth covers every dashboard endpoint, including `/metrics` and the WebSocket handshake; without TLS, credentials travel over cleartext HTTP.
+The server defaults to `127.0.0.1`. Host headers and browser origins must match configured dashboard endpoints, preventing foreign-origin WebSocket upgrades and DNS rebinding. Loopback names and the configured bind address are trusted by default; wildcard binds require explicit `web.allowed_origins` for remote hostnames or addresses. Native clients may omit Origin but still need a trusted Host. For remote access, enable TLS and authentication as shown in [Reference](reference.md#remote-dashboard). Basic auth covers every dashboard endpoint, including `/metrics` and the WebSocket handshake; without TLS, credentials travel over cleartext HTTP.
 
 ## Development checks
 

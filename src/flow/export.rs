@@ -66,7 +66,7 @@ fn write_flow_csv_to_writer<W: Write>(
     for flow in flows {
         write_flow_csv_row(writer, flow)?;
     }
-    Ok(())
+    writer.flush()
 }
 
 fn write_flow_csv_header<W: Write>(writer: &mut W) -> std::io::Result<()> {
@@ -155,6 +155,35 @@ mod tests {
     use super::*;
     use crate::flow::{Endpoint, ExpiredFlowReason, FlowDirection, FlowProtocol, TcpState};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn csv_propagates_buffered_write_and_flush_errors() {
+        struct Failure(bool);
+        impl Write for Failure {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.0 {
+                    Err(std::io::ErrorKind::BrokenPipe.into())
+                } else {
+                    Ok(bytes.len())
+                }
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::ErrorKind::Other.into())
+            }
+        }
+        for fail_write in [false, true] {
+            let mut writer = BufWriter::new(Failure(fail_write));
+            let error = write_flow_csv_to_writer(&mut writer, &[]).unwrap_err();
+            assert_eq!(
+                error.kind(),
+                if fail_write {
+                    std::io::ErrorKind::BrokenPipe
+                } else {
+                    std::io::ErrorKind::Other
+                }
+            );
+        }
+    }
 
     #[test]
     fn csv_layout_keeps_empty_optional_columns() {

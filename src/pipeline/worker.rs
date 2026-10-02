@@ -70,6 +70,8 @@ pub struct Worker {
     emit_expired_flows: bool,
     expired_flows_buf: Vec<ExpiredFlowEvent>,
     last_expire_check_ts: f64,
+    offline: bool,
+    capture_watermark: Option<f64>,
     agg_send_failed: bool,
     // Per-tick accumulators
     tick_bytes: u64,
@@ -79,6 +81,7 @@ pub struct Worker {
 }
 
 pub struct WorkerConfigBundle {
+    pub offline: bool,
     pub flow_cfg: FlowConfig,
     pub analysis_cfg: AnalysisConfig,
     pub web_cfg: WebConfig,
@@ -94,6 +97,7 @@ impl Worker {
         buffer_returner: PacketBufReturner,
     ) -> Self {
         let WorkerConfigBundle {
+            offline,
             flow_cfg,
             analysis_cfg,
             web_cfg,
@@ -119,6 +123,8 @@ impl Worker {
             emit_expired_flows,
             expired_flows_buf: Vec::new(),
             last_expire_check_ts: 0.0,
+            offline,
+            capture_watermark: None,
             agg_send_failed: false,
             tick_bytes: 0,
             tick_packets: 0,
@@ -191,6 +197,7 @@ impl Worker {
     }
 
     fn process_packet(&mut self, pkt: &OwnedPacket, agg_tx: &Sender<WorkerEvent>) {
+        self.capture_watermark = Some(self.capture_watermark.map_or(pkt.ts, |ts| ts.max(pkt.ts)));
         self.run_stats.processed_frames = self.run_stats.processed_frames.saturating_add(1);
         self.tick_bytes += pkt.wire_len;
         self.tick_packets += 1;
@@ -224,7 +231,17 @@ impl Worker {
                 }
 
                 // Flow tracking
-                self.flow_tracker.observe(pkt.ts, pkt.wire_len, &parsed);
+                if self.emit_expired_flows {
+                    self.flow_tracker.observe_collect(
+                        pkt.ts,
+                        pkt.wire_len,
+                        &parsed,
+                        &mut self.expired_flows_buf,
+                    );
+                    self.flush_expired_flows(agg_tx);
+                } else {
+                    self.flow_tracker.observe(pkt.ts, pkt.wire_len, &parsed);
+                }
 
                 if self.heavy_hitter_top_n > 0
                     && let Some(key) = crate::flow::flow_compact_key_from_packet(&parsed)
@@ -260,20 +277,6 @@ impl Worker {
                         return;
                     }
                 }
-
-                // Flow expiration (gate checks to avoid per-packet overhead)
-                if pkt.ts < self.last_expire_check_ts {
-                    self.last_expire_check_ts = pkt.ts;
-                } else if (pkt.ts - self.last_expire_check_ts) >= 1.0 {
-                    self.last_expire_check_ts = pkt.ts;
-                    if self.emit_expired_flows {
-                        self.flow_tracker
-                            .maybe_expire_collect(pkt.ts, &mut self.expired_flows_buf);
-                        self.flush_expired_flows(agg_tx);
-                    } else {
-                        self.flow_tracker.maybe_expire(pkt.ts);
-                    }
-                }
             }
             Err(e) => {
                 self.run_stats.packet_parse_errors =
@@ -284,6 +287,12 @@ impl Worker {
                     .saturating_add(1);
                 tracing::trace!(shard = self.shard_id, error = %e, "parse error");
             }
+        }
+        // Advance expiry even for malformed frames, using monotonic capture time.
+        let now = self.capture_watermark.unwrap_or(pkt.ts);
+        if now - self.last_expire_check_ts >= 1.0 {
+            self.last_expire_check_ts = now;
+            self.expire_at(now, agg_tx);
         }
     }
 
@@ -328,7 +337,18 @@ impl Worker {
     }
 
     fn expire_idle_flows(&mut self, agg_tx: &Sender<WorkerEvent>) {
-        let now = unix_secs_now();
+        let now = if self.offline {
+            let Some(ts) = self.capture_watermark else {
+                return;
+            };
+            ts
+        } else {
+            unix_secs_now()
+        };
+        self.expire_at(now, agg_tx);
+    }
+
+    fn expire_at(&mut self, now: f64, agg_tx: &Sender<WorkerEvent>) {
         if self.emit_expired_flows {
             self.flow_tracker
                 .maybe_expire_collect(now, &mut self.expired_flows_buf);
@@ -400,6 +420,63 @@ fn unix_secs_now() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn offline_idle_expiry_uses_capture_watermark_including_malformed_frames() {
+        for offline in [true, false] {
+            let pool = crate::pipeline::PacketBufPool::new(1, 64);
+            let mut worker = Worker::new(
+                0,
+                protocol::LinkType::Ethernet,
+                WorkerConfigBundle {
+                    offline,
+                    flow_cfg: FlowConfig {
+                        timeout_secs: 120.0,
+                        max_flows: 10,
+                    },
+                    analysis_cfg: AnalysisConfig::default(),
+                    web_cfg: WebConfig::default(),
+                    heavy_hitter_top_n: 0,
+                    emit_expired_flows: true,
+                },
+                pool.returner(),
+            );
+            let trace = include_bytes!("../../examples/pcaps/normal.pcap");
+            let length = u32::from_le_bytes(trace[32..36].try_into().unwrap()) as usize;
+            let (tx, rx) = crossbeam_channel::unbounded();
+            let mut packet = OwnedPacket {
+                id: 1,
+                ts: 100.0,
+                wire_len: length as u64,
+                data: trace[40..40 + length].to_vec(),
+            };
+            worker.process_packet(&packet, &tx);
+            packet.ts = 90.0;
+            worker.process_packet(&packet, &tx);
+            assert_eq!(worker.capture_watermark, Some(100.0));
+            worker.expire_idle_flows(&tx);
+            assert_eq!(worker.flow_tracker.len(), usize::from(offline));
+            if offline {
+                packet.ts = 221.0;
+                packet.data.clear();
+                worker.process_packet(&packet, &tx);
+                assert!(worker.flow_tracker.is_empty());
+            }
+            let expired: Vec<_> = rx
+                .try_iter()
+                .filter_map(|event| match event {
+                    WorkerEvent::ExpiredFlows(events) => Some(events),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            assert_eq!(expired.len(), 1);
+            assert_eq!(expired[0].reason, crate::flow::ExpiredFlowReason::Timeout);
+            if offline {
+                assert_eq!(expired[0].ts, 221.0);
+            }
+        }
+    }
 
     #[test]
     fn timeout_until_tick_returns_remaining_duration() {

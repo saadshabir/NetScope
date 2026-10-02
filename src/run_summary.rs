@@ -128,6 +128,7 @@ pub struct EffectiveOutputConfig {
 
 #[derive(Debug, Serialize)]
 pub struct EffectiveWebConfig {
+    pub allowed_origins: Vec<String>,
     pub enabled: bool,
     pub bind: String,
     pub port: u16,
@@ -284,6 +285,7 @@ pub fn effective_config(input: EffectiveConfigInput<'_>) -> EffectiveConfig {
             quiet: output.quiet,
         },
         web: EffectiveWebConfig {
+            allowed_origins: web.allowed_origins.clone(),
             enabled: web.enabled,
             bind: web.bind.clone(),
             port: web.port,

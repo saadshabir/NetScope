@@ -187,7 +187,7 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
                 WorkerEvent::ShardTick(shard_tick) => {
                     let idx = shard_tick.shard_id;
                     if idx < pending_ticks.len() {
-                        pending_ticks[idx] = Some(shard_tick);
+                        accumulate_tick(&mut pending_ticks[idx], shard_tick, max_top_n);
                     }
 
                     // Check if all shards have reported.
@@ -296,6 +296,34 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
                 break;
             }
         }
+    }
+
+    // Publish a final partial interval when a shard stops before its peers.
+    if pending_ticks.iter().any(Option::is_some) {
+        let elapsed = tick_start.elapsed().as_secs_f64().max(0.001);
+        let kernel = kernel_tick_stats(&kernel_stats, &mut prev_kernel_totals);
+        let merged = merge_ticks(&mut pending_ticks, elapsed, max_top_n, &stats, kernel);
+        metrics::observe_tick(
+            merged.bytes,
+            merged.packets,
+            merged.active_flows,
+            merged.dispatch_drops,
+            merged.kernel_drops,
+            merged.kernel_if_drops,
+        );
+        if let Some(tx) = &web_event_tx {
+            let tick = aggregated_to_stats_tick(
+                &merged,
+                web_top_n,
+                frame_seq.fetch_add(1, Ordering::Relaxed),
+            );
+            let _ = tx.try_send(CaptureEvent::Tick(tick));
+        }
+        handle
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .latest_tick = Some(merged);
     }
 
     handle.append_output_errors(output_sinks.take_errors());
@@ -459,6 +487,35 @@ fn handle_fatal_error(
     running.store(false, Ordering::SeqCst);
 }
 
+fn accumulate_tick(slot: &mut Option<ShardTick>, tick: ShardTick, max_top_n: usize) {
+    let Some(pending) = slot.as_mut() else {
+        *slot = Some(tick);
+        return;
+    };
+    pending.bytes = pending.bytes.saturating_add(tick.bytes);
+    pending.packets = pending.packets.saturating_add(tick.packets);
+    pending.active_flows = tick.active_flows;
+    let mut flows: ahash::AHashMap<_, _> = pending
+        .top_flows
+        .drain(..)
+        .map(|(delta, snapshot)| (delta.key.clone(), (delta, snapshot)))
+        .collect();
+    for (delta, snapshot) in tick.top_flows {
+        if let Some((previous, previous_snapshot)) = flows.get_mut(&delta.key) {
+            previous.delta_bytes = previous.delta_bytes.saturating_add(delta.delta_bytes);
+            *previous_snapshot = snapshot;
+        } else {
+            flows.insert(delta.key.clone(), (delta, snapshot));
+        }
+    }
+    pending.top_flows = flows.into_values().collect();
+    pending
+        .top_flows
+        .sort_unstable_by(|a, b| b.0.delta_bytes.cmp(&a.0.delta_bytes));
+    // Worker candidates are already approximate; keep the accumulator bounded.
+    pending.top_flows.truncate(max_top_n);
+}
+
 fn merge_ticks(
     pending: &mut [Option<ShardTick>],
     elapsed_secs: f64,
@@ -588,6 +645,91 @@ mod tests {
             rtt_ewma_ms: None,
             rtt_samples: 0,
         }
+    }
+
+    #[test]
+    fn shutdown_publishes_accumulated_partial_ticks() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        for bytes in [100, 200] {
+            tx.send(WorkerEvent::ShardTick(ShardTick {
+                shard_id: 0,
+                bytes,
+                packets: 1,
+                active_flows: 1,
+                top_flows: vec![],
+            }))
+            .unwrap();
+        }
+        drop(tx);
+        let handle = AggregatorHandle::new(2);
+        run(
+            rx,
+            handle.clone(),
+            AggregatorRunConfig {
+                web_event_tx: None,
+                max_top_n: 0,
+                web_top_n: 0,
+                stats: Arc::new(PipelineStats::new()),
+                kernel_stats: Arc::new(KernelPcapStats::new()),
+                tick_deadline_ms: 1000,
+                output_sinks: OutputSinks::open(None, None, None),
+                running: Arc::new(AtomicBool::new(true)),
+            },
+        );
+        let tick = handle.take_tick().unwrap();
+        assert_eq!((tick.bytes, tick.packets), (300, 2));
+    }
+
+    #[test]
+    fn repeated_shard_ticks_accumulate_counters_and_flow_deltas() {
+        let mut pending = vec![None; 2];
+        let snapshot = test_snapshot(1001);
+        let key =
+            crate::flow::FlowKey::new(snapshot.protocol, snapshot.endpoint_a, snapshot.endpoint_b)
+                .0;
+        for bytes in [100, 200] {
+            accumulate_tick(
+                &mut pending[0],
+                ShardTick {
+                    shard_id: 0,
+                    bytes,
+                    packets: 1,
+                    active_flows: bytes as usize,
+                    top_flows: vec![(
+                        FlowDelta {
+                            key: key.clone(),
+                            delta_bytes: bytes,
+                        },
+                        snapshot.clone(),
+                    )],
+                },
+                2,
+            );
+        }
+        accumulate_tick(
+            &mut pending[1],
+            ShardTick {
+                shard_id: 1,
+                bytes: 300,
+                packets: 1,
+                active_flows: 3,
+                top_flows: vec![],
+            },
+            2,
+        );
+        let merged = merge_ticks(
+            &mut pending,
+            1.0,
+            2,
+            &PipelineStats::new(),
+            KernelTickStats::default(),
+        );
+        assert_eq!(merged.bytes, 600);
+        assert_eq!(merged.packets, 3);
+        assert_eq!(merged.active_flows, 203);
+        assert_eq!(merged.top_flows.len(), 1);
+        assert_eq!(merged.top_flows[0].0.delta_bytes, 300);
+        assert!(pending.iter().all(Option::is_none));
     }
 
     #[test]

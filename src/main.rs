@@ -1,4 +1,5 @@
 mod cli;
+mod output_paths;
 
 use netscope::run_summary::{self, RunAccounting, RunSummary};
 use netscope::{analysis, capture, config, display, flow, metrics, pipeline, protocol, web};
@@ -423,6 +424,7 @@ fn start_web_dashboard(
     }
 
     let server_config = web::server::WebServerConfig {
+        allowed_origins: config.web.allowed_origins.clone(),
         bind: config.web.bind.clone(),
         port: config.web.port,
         tick_ms: config.web.tick_ms,
@@ -656,7 +658,10 @@ impl RotatingSavefile {
         };
 
         for entry in entries.flatten() {
-            if !entry.file_type().is_ok_and(|file_type| file_type.is_file()) {
+            if !entry
+                .file_type()
+                .is_ok_and(|kind| kind.is_file() || kind.is_symlink())
+            {
                 continue;
             }
 
@@ -672,16 +677,22 @@ impl RotatingSavefile {
 
     fn parse_segment_index(base_path: &Path, path: &Path) -> Option<u64> {
         let file_name = path.file_name()?.to_string_lossy();
+        #[cfg(any(target_os = "macos", windows))]
+        let file_name = file_name.to_ascii_lowercase();
         let stem = base_path
             .file_stem()
             .or_else(|| base_path.file_name())
             .unwrap_or_else(|| OsStr::new("capture"))
             .to_string_lossy();
 
+        #[cfg(any(target_os = "macos", windows))]
+        let stem = stem.to_ascii_lowercase();
         let with_stem_prefix = format!("{}.", stem);
 
         let index_str = if let Some(ext) = base_path.extension() {
             let ext_suffix = format!(".{}", ext.to_string_lossy());
+            #[cfg(any(target_os = "macos", windows))]
+            let ext_suffix = ext_suffix.to_ascii_lowercase();
             let without_ext = file_name.strip_suffix(&ext_suffix)?;
             without_ext.strip_prefix(&with_stem_prefix)?
         } else {
@@ -981,6 +992,7 @@ fn run_capture_inline(
         analysis::anomaly::AnomalyDetector::new(config.analysis.anomalies.clone());
     let mut expired_flow_events: Vec<flow::ExpiredFlowEvent> = Vec::new();
     let mut last_expire_check_ts: f64 = 0.0;
+    let mut capture_watermark: Option<f64> = None;
 
     let mut stats_last = Instant::now();
     let mut stats_bytes: u64 = 0;
@@ -1033,6 +1045,8 @@ fn run_capture_inline(
 
                 let timestamp =
                     packet.header.ts.tv_sec as f64 + packet.header.ts.tv_usec as f64 / 1_000_000.0;
+                capture_watermark =
+                    Some(capture_watermark.map_or(timestamp, |ts| ts.max(timestamp)));
                 let raw_data = packet.data;
                 let wire_len = packet.header.len as u64;
                 accounting.input_wire_bytes = accounting.input_wire_bytes.saturating_add(wire_len);
@@ -1099,7 +1113,21 @@ fn run_capture_inline(
                                 }
                             }
                         }
-                        flow_tracker.observe(timestamp, wire_len, &parsed);
+                        if emit_expired_flows {
+                            flow_tracker.observe_collect(
+                                timestamp,
+                                wire_len,
+                                &parsed,
+                                &mut expired_flow_events,
+                            );
+                            flush_expired_flows_accounted(
+                                &mut output_sinks,
+                                &mut expired_flow_events,
+                                accounting,
+                            )?;
+                        } else {
+                            flow_tracker.observe(timestamp, wire_len, &parsed);
+                        }
                         sync_flow_accounting(accounting, &flow_tracker);
 
                         // Send packet samples to web dashboard.
@@ -1158,19 +1186,18 @@ fn run_capture_inline(
                 web_tick_bytes += wire_len;
                 web_tick_packets += 1;
 
-                if timestamp < last_expire_check_ts {
-                    last_expire_check_ts = timestamp;
-                } else if (timestamp - last_expire_check_ts) >= 1.0 {
-                    last_expire_check_ts = timestamp;
+                let watermark = capture_watermark.unwrap_or(timestamp);
+                if (watermark - last_expire_check_ts) >= 1.0 {
+                    last_expire_check_ts = watermark;
                     if emit_expired_flows {
-                        flow_tracker.maybe_expire_collect(timestamp, &mut expired_flow_events);
+                        flow_tracker.maybe_expire_collect(watermark, &mut expired_flow_events);
                         flush_expired_flows_accounted(
                             &mut output_sinks,
                             &mut expired_flow_events,
                             accounting,
                         )?;
                     } else {
-                        flow_tracker.maybe_expire(timestamp);
+                        flow_tracker.maybe_expire(watermark);
                     }
                 }
             } else {
@@ -1406,6 +1433,7 @@ fn run_capture_pipeline(
     };
 
     let pipeline_cfg = pipeline::PipelineConfig {
+        offline: matches!(cap.mode(), CaptureMode::Offline),
         num_workers: config.pipeline.workers,
         channel_capacity: config.pipeline.channel_capacity,
         buffer_pool_capacity: config.pipeline.channel_capacity.saturating_mul(2).max(1),
@@ -1614,6 +1642,7 @@ fn run_capture_pipeline(
 
 #[derive(Debug, Clone)]
 struct RuntimeConfig {
+    config_path: Option<PathBuf>,
     capture: config::CaptureConfig,
     run: config::RunConfig,
     output: config::OutputConfig,
@@ -1731,6 +1760,103 @@ impl RuntimeConfig {
                 .map_err(config::ConfigError::Validation)?;
         }
 
+        self.validate_output_paths()?;
+        Ok(())
+    }
+
+    fn validate_output_paths(&self) -> Result<(), config::ConfigError> {
+        let mut reads = Vec::new();
+        if let Some(path) = &self.config_path {
+            reads.push(("config file", path.as_path()));
+        }
+        if let Some(path) = &self.capture.read_pcap {
+            reads.push(("capture.read_pcap", path.as_path()));
+        }
+        if self.web.enabled && self.web.tls.enabled {
+            reads.push((
+                "web.tls.cert_path",
+                self.web
+                    .tls
+                    .cert_path
+                    .as_deref()
+                    .expect("validated TLS cert"),
+            ));
+            reads.push((
+                "web.tls.key_path",
+                self.web.tls.key_path.as_deref().expect("validated TLS key"),
+            ));
+        }
+        if self.web.enabled
+            && self.web.auth.enabled
+            && let Some(path) = &self.web.auth.password_file
+        {
+            reads.push(("web.auth.password_file", path.as_path()));
+        }
+        let outputs = [
+            ("output.write_pcap", self.output.write_pcap.as_deref()),
+            ("output.export_json", self.output.export_json.as_deref()),
+            ("output.export_csv", self.output.export_csv.as_deref()),
+            ("output.summary_json", self.output.summary_json.as_deref()),
+            (
+                "output.expired_flows_jsonl",
+                self.output.expired_flows_jsonl.as_deref(),
+            ),
+            (
+                "output.expired_flows_csv",
+                self.output.expired_flows_csv.as_deref(),
+            ),
+            (
+                "analysis.alerts_jsonl",
+                self.analysis.alerts_jsonl.as_deref(),
+            ),
+        ];
+        let outputs: Vec<_> = outputs
+            .into_iter()
+            .filter_map(|(name, path)| path.map(|path| (name, path)))
+            .collect();
+        output_paths::validate(&reads, &outputs).map_err(config::ConfigError::Validation)?;
+        if self.output.write_pcap_rotate_mb > 0 {
+            let base = self
+                .output
+                .write_pcap
+                .as_deref()
+                .expect("validated rotation base");
+            let segments = RotatingSavefile::collect_existing_segments(base);
+            let next_index = segments
+                .last()
+                .map_or(1, |(index, _)| index.saturating_add(1));
+            let next_path = RotatingSavefile::segment_path(base, next_index);
+            for (name, path) in reads.iter().chain(
+                outputs
+                    .iter()
+                    .filter(|(name, _)| *name != "output.write_pcap"),
+            ) {
+                let resolved =
+                    output_paths::resolved(path).map_err(config::ConfigError::Validation)?;
+                let in_namespace = |candidate: &Path| -> Result<bool, config::ConfigError> {
+                    Ok(output_paths::same_parent(base, candidate)
+                        .map_err(config::ConfigError::Validation)?
+                        && RotatingSavefile::parse_segment_index(base, candidate).is_some())
+                };
+                if in_namespace(path)? || in_namespace(&resolved)? {
+                    return Err(config::ConfigError::Validation(format!(
+                        "{name} overlaps the rotated PCAP filename namespace"
+                    )));
+                }
+                output_paths::validate(
+                    &[(*name, *path)],
+                    &[("next rotated PCAP segment", next_path.as_path())],
+                )
+                .map_err(config::ConfigError::Validation)?;
+                for (_, segment) in &segments {
+                    output_paths::validate(
+                        &[(*name, *path)],
+                        &[("rotated PCAP segment", segment.as_path())],
+                    )
+                    .map_err(config::ConfigError::Validation)?;
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -1852,6 +1978,7 @@ fn load_config(args: &cli::Cli) -> Result<RuntimeConfig, config::ConfigError> {
     }
 
     Ok(RuntimeConfig {
+        config_path: args.config.clone(),
         capture,
         run,
         output,

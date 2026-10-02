@@ -4,7 +4,7 @@ Run the commands below from the repository root.
 
 ## Build requirements
 
-Use the Rust toolchain pinned in [`rust-toolchain.toml`](../rust-toolchain.toml) and install libpcap development headers if your platform does not provide them. On Debian or Ubuntu:
+Use the Rust toolchain pinned in [`rust-toolchain.toml`](../rust-toolchain.toml) and install libpcap 1.5.0 or newer and its development headers if your platform does not provide them. On Debian or Ubuntu:
 
 ```sh
 sudo apt-get install libpcap-dev

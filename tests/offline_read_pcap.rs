@@ -12,6 +12,160 @@ fn temp_path(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("netscope-{}-{}.pcap", name, unique))
 }
 
+#[test]
+fn input_output_collisions_fail_before_modifying_the_capture() {
+    let input = temp_path("input-output-collision");
+    write_test_pcap(&input, 1, &make_ethernet_packet());
+    let original = std::fs::read(&input).unwrap();
+    for flag in [
+        "--write-pcap",
+        "--export-json",
+        "--export-csv",
+        "--summary-json",
+        "--expired-flows-jsonl",
+        "--expired-flows-csv",
+        "--alerts-jsonl",
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+            .arg("--read-pcap")
+            .arg(&input)
+            .arg("--quiet")
+            .arg(flag)
+            .arg(&input)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "accepted collision for {flag}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("same file"));
+        assert_eq!(std::fs::read(&input).unwrap(), original);
+    }
+    let hardlink = temp_path("hardlink-output-collision");
+    std::fs::hard_link(&input, &hardlink).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+        .arg("--read-pcap")
+        .arg(&input)
+        .arg("--write-pcap")
+        .arg(&hardlink)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(std::fs::read(&input).unwrap(), original);
+    std::fs::remove_file(hardlink).unwrap();
+    #[cfg(unix)]
+    {
+        let symlink = temp_path("symlink-output-collision");
+        std::os::unix::fs::symlink(&input, &symlink).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+            .arg("--read-pcap")
+            .arg(&input)
+            .arg("--write-pcap")
+            .arg(&symlink)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert_eq!(std::fs::read(&input).unwrap(), original);
+        std::fs::remove_file(symlink).unwrap();
+    }
+    std::fs::remove_file(input).unwrap();
+}
+
+#[test]
+fn output_aliases_and_rotated_input_are_rejected_before_creation() {
+    let input = temp_path("safe-input");
+    write_test_pcap(&input, 1, &make_ethernet_packet());
+    let output_path = temp_path("future-output");
+    let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+        .arg("--read-pcap")
+        .arg(&input)
+        .arg("--export-json")
+        .arg(&output_path)
+        .arg("--summary-json")
+        .arg(&output_path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!output_path.exists());
+    let base = temp_path("rotating-output");
+    let segment = base.with_file_name(format!(
+        "{}.000001.pcap",
+        base.file_stem().unwrap().to_str().unwrap()
+    ));
+    std::fs::copy(&input, &segment).unwrap();
+    let original = std::fs::read(&segment).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+        .arg("--read-pcap")
+        .arg(&segment)
+        .arg("--write-pcap")
+        .arg(&base)
+        .args(["--write-pcap-rotate-mb", "1", "--write-pcap-max-files", "1"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(std::fs::read(&segment).unwrap(), original);
+    assert!(!base.exists());
+    // The source may have a different filename but share a retained segment's inode.
+    std::fs::remove_file(&segment).unwrap();
+    std::fs::hard_link(&input, &segment).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+        .arg("--read-pcap")
+        .arg(&input)
+        .arg("--write-pcap")
+        .arg(&base)
+        .args(["--write-pcap-rotate-mb", "1", "--write-pcap-max-files", "1"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(std::fs::read(&input).unwrap(), original);
+    std::fs::remove_file(segment).unwrap();
+    std::fs::remove_file(input).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn rotated_outputs_reject_symlinks_into_future_segments() {
+    let input = temp_path("rotation-symlink-input");
+    write_test_pcap(&input, 1, &make_ethernet_packet());
+    let base = temp_path("rotation-symlink-base");
+    let future_segment = base.with_file_name(format!(
+        "{}.000100.pcap",
+        base.file_stem().unwrap().to_str().unwrap()
+    ));
+    let export_alias = temp_path("rotation-symlink-export");
+    std::os::unix::fs::symlink(&future_segment, &export_alias).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+        .arg("--read-pcap")
+        .arg(&input)
+        .arg("--write-pcap")
+        .arg(&base)
+        .args(["--write-pcap-rotate-mb", "1", "--write-pcap-max-files", "1"])
+        .arg("--export-json")
+        .arg(&export_alias)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!future_segment.exists());
+    assert!(!base.exists());
+    // A retained symlink must not be followed into the source while opening a segment.
+    let segment = base.with_file_name(format!(
+        "{}.000001.pcap",
+        base.file_stem().unwrap().to_str().unwrap()
+    ));
+    std::os::unix::fs::symlink(&input, &segment).unwrap();
+    let original = std::fs::read(&input).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+        .arg("--read-pcap")
+        .arg(&input)
+        .arg("--write-pcap")
+        .arg(&base)
+        .args(["--write-pcap-rotate-mb", "1", "--write-pcap-max-files", "1"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(std::fs::read(&input).unwrap(), original);
+    std::fs::remove_file(segment).unwrap();
+    std::fs::remove_file(export_alias).unwrap();
+    std::fs::remove_file(input).unwrap();
+}
+
 fn write_test_pcap(path: &Path, linktype: u32, packet: &[u8]) {
     let mut file = File::create(path).expect("failed to create temp pcap");
 
