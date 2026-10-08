@@ -52,6 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Reduced flow bookkeeping and expiry work, added focused benchmarks, and lowered pipeline memory use with growable packet buffers and optional shutdown snapshots.
 - Consolidated the README and ten overlapping guides into five reader pages and the investigation guide; removed duplicate CLI tables and corrected local links.
 - Moved `scripts/perf/validate-web.sh` and `scripts/perf/perf-web.toml` to `scripts/smoke/dashboard.sh` and `scripts/smoke/dashboard.toml` so the manual live-dashboard check is not presented as a benchmark.
 - Replaced malformed `.gitignore` fences and broad patterns with explicit local build, benchmark, smoke, and trace rules.

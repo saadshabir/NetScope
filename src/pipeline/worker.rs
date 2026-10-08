@@ -65,6 +65,7 @@ pub struct Worker {
     flow_tracker: FlowTracker,
     web_cfg: WebConfig,
     heavy_hitter_top_n: usize,
+    collect_final_flows: bool,
     buffer_returner: PacketBufReturner,
     top_flows_hh: SpaceSavingTopFlows,
     emit_expired_flows: bool,
@@ -86,6 +87,7 @@ pub struct WorkerConfigBundle {
     pub analysis_cfg: AnalysisConfig,
     pub web_cfg: WebConfig,
     pub heavy_hitter_top_n: usize,
+    pub collect_final_flows: bool,
     pub emit_expired_flows: bool,
 }
 
@@ -102,6 +104,7 @@ impl Worker {
             analysis_cfg,
             web_cfg,
             heavy_hitter_top_n,
+            collect_final_flows,
             emit_expired_flows,
         } = cfg;
         let tick_interval = tick_interval_for(&web_cfg);
@@ -118,6 +121,7 @@ impl Worker {
             flow_tracker,
             web_cfg,
             heavy_hitter_top_n,
+            collect_final_flows,
             buffer_returner,
             top_flows_hh: SpaceSavingTopFlows::new(heavy_hitter_top_n),
             emit_expired_flows,
@@ -182,8 +186,13 @@ impl Worker {
         self.emit_tick(&agg_tx);
         self.flush_expired_flows(&agg_tx);
 
-        // Send shutdown event with final flow snapshot.
-        let flows = self.flow_tracker.snapshot();
+        // Always send accounting; only materialize retained flows when a
+        // final export will consume them.
+        let flows = if self.collect_final_flows {
+            self.flow_tracker.snapshot()
+        } else {
+            Vec::new()
+        };
         let _ = agg_tx.send(WorkerEvent::Shutdown(ShardShutdown {
             shard_id: self.shard_id,
             flows,
@@ -422,6 +431,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn final_exports_are_optional_but_shutdown_accounting_is_always_present() {
+        for collect_final_flows in [false, true] {
+            let pool = crate::pipeline::PacketBufPool::new(1, 65535);
+            let mut worker = Worker::new(
+                0,
+                protocol::LinkType::Ethernet,
+                WorkerConfigBundle {
+                    offline: true,
+                    flow_cfg: FlowConfig {
+                        timeout_secs: 0.0,
+                        max_flows: 10,
+                    },
+                    analysis_cfg: AnalysisConfig::default(),
+                    web_cfg: WebConfig::default(),
+                    heavy_hitter_top_n: 0,
+                    collect_final_flows,
+                    emit_expired_flows: false,
+                },
+                pool.returner(),
+            );
+            let trace = include_bytes!("../../examples/pcaps/normal.pcap");
+            let length = u32::from_le_bytes(trace[32..36].try_into().unwrap()) as usize;
+            let (pkt_tx, pkt_rx) = crossbeam_channel::unbounded();
+            let (agg_tx, agg_rx) = crossbeam_channel::unbounded();
+            pkt_tx
+                .send(OwnedPacket {
+                    id: 1,
+                    ts: 1.0,
+                    wire_len: length as u64,
+                    data: trace[40..40 + length].to_vec(),
+                })
+                .unwrap();
+            drop(pkt_tx);
+            worker.run(pkt_rx, agg_tx, &AtomicBool::new(true));
+            let shutdown = agg_rx
+                .try_iter()
+                .find_map(|event| match event {
+                    WorkerEvent::Shutdown(shutdown) => Some(shutdown),
+                    _ => None,
+                })
+                .unwrap();
+            assert_eq!(shutdown.stats.processed_frames, 1);
+            assert_eq!(shutdown.stats.parsed_packets, 1);
+            assert_eq!(shutdown.stats.flows.created, 1);
+            assert_eq!(shutdown.flows.len(), usize::from(collect_final_flows));
+            if collect_final_flows {
+                assert_eq!(shutdown.flows[0].packets_total, 1);
+            }
+        }
+    }
+
+    #[test]
     fn offline_idle_expiry_uses_capture_watermark_including_malformed_frames() {
         for offline in [true, false] {
             let pool = crate::pipeline::PacketBufPool::new(1, 64);
@@ -437,6 +498,7 @@ mod tests {
                     analysis_cfg: AnalysisConfig::default(),
                     web_cfg: WebConfig::default(),
                     heavy_hitter_top_n: 0,
+                    collect_final_flows: false,
                     emit_expired_flows: true,
                 },
                 pool.returner(),

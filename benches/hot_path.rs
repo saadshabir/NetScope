@@ -4,7 +4,7 @@
 //! - `pipeline::router::shard_for_packet` (shard routing)
 //! - `handshake_sequence` (SYN → SYN-ACK → ACK end-to-end hot path)
 
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::time::Duration;
 
 // We can't import private modules from the binary crate directly.
@@ -192,21 +192,103 @@ fn bench_flow_observe(c: &mut Criterion) {
         })
     });
 
-    group.bench_function("new_flows", |b| {
-        // Each iteration creates a brand new flow (cold path).
-        let mut port: u16 = 1024;
-        b.iter(|| {
-            let pkt = make_tcp_data_packet([10, 0, 0, 1], [10, 0, 0, 2], port, 80, 1000, 1, 100);
-            let parsed = netscope::protocol::parse_packet(&pkt).unwrap();
-            let mut tracker = netscope::flow::FlowTracker::new(60.0, 100_000, true, true, true);
-            tracker.observe(black_box(1.0), 100, &parsed);
-            port = port.wrapping_add(1);
-            if port < 1024 {
-                port = 1024;
-            }
-        })
-    });
+    for (name, limit) in [
+        ("existing_flow_scale", 100_000),
+        ("existing_flow_unlimited", 0),
+    ] {
+        group.bench_function(name, |b| {
+            let mut tracker = netscope::flow::FlowTracker::new(60.0, limit, false, false, false);
+            tracker.observe(1.0, 100, &parsed);
+            b.iter(|| tracker.observe(black_box(2.0), 100, black_box(&parsed)))
+        });
+    }
 
+    // Parse fixtures and allocate each table outside the timed region. Measure
+    // a batch of distinct insertions into one table, rather than table setup.
+    const BATCH: usize = 1024;
+    let packets: Vec<_> = (0..BATCH)
+        .map(|i| {
+            make_tcp_data_packet(
+                [10, 0, 0, 1],
+                [10, 0, 0, 2],
+                1024 + i as u16,
+                80,
+                1000,
+                1,
+                100,
+            )
+        })
+        .collect();
+    let parsed: Vec<_> = packets
+        .iter()
+        .map(|packet| netscope::protocol::parse_packet(packet).unwrap())
+        .collect();
+    group.throughput(Throughput::Elements(BATCH as u64));
+    for (mode, deep) in [("full", true), ("scale", false)] {
+        group.bench_function(format!("new_flows_{mode}"), |b| {
+            b.iter_batched_ref(
+                || netscope::flow::FlowTracker::new(60.0, BATCH, deep, deep, deep),
+                |tracker| {
+                    for packet in &parsed {
+                        tracker.observe(black_box(1.0), 100, black_box(packet));
+                    }
+                    black_box(tracker.len());
+                },
+                BatchSize::SmallInput,
+            )
+        });
+        group.bench_function(format!("capacity_churn_{mode}"), |b| {
+            b.iter_batched_ref(
+                || {
+                    let mut tracker = netscope::flow::FlowTracker::new(60.0, 256, deep, deep, deep);
+                    for packet in &parsed[..256] {
+                        tracker.observe(1.0, 100, packet);
+                    }
+                    tracker
+                },
+                |tracker| {
+                    for packet in &parsed {
+                        tracker.observe(black_box(2.0), 100, black_box(packet));
+                    }
+                    black_box(tracker.len());
+                },
+                BatchSize::SmallInput,
+            )
+        });
+    }
+
+    group.finish();
+}
+
+fn bench_flow_expire(c: &mut Criterion) {
+    const BATCH: usize = 1024;
+    let packets: Vec<_> = (0..BATCH)
+        .map(|i| make_tcp_syn_packet([10, 0, 0, 1], [10, 0, 0, 2], 1024 + i as u16, 80))
+        .collect();
+    let parsed: Vec<_> = packets
+        .iter()
+        .map(|packet| netscope::protocol::parse_packet(packet).unwrap())
+        .collect();
+    let mut group = c.benchmark_group("flow_expire");
+    group.throughput(Throughput::Elements(BATCH as u64));
+    for (mode, deep) in [("full", true), ("scale", false)] {
+        for (name, now) in [("active", 2.0), ("expired", 120.0)] {
+            group.bench_function(format!("{name}_{mode}"), |b| {
+                b.iter_batched_ref(
+                    || {
+                        let mut tracker =
+                            netscope::flow::FlowTracker::new(60.0, BATCH, deep, deep, deep);
+                        for packet in &parsed {
+                            tracker.observe(1.0, 54, packet);
+                        }
+                        tracker
+                    },
+                    |tracker| black_box(tracker.maybe_expire(black_box(now))),
+                    BatchSize::SmallInput,
+                )
+            });
+        }
+    }
     group.finish();
 }
 
@@ -311,6 +393,7 @@ criterion_group!(
     benches,
     bench_parse_packet,
     bench_flow_observe,
+    bench_flow_expire,
     bench_shard_routing,
     bench_handshake_sequence,
 );

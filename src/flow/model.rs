@@ -39,6 +39,8 @@ pub struct FlowEntry {
     #[serde(skip)]
     fin_seen: u8,
     #[serde(skip)]
+    pub(crate) referenced: bool,
+    #[serde(skip)]
     a_to_b_seq: TcpSeqTracker,
     #[serde(skip)]
     b_to_a_seq: TcpSeqTracker,
@@ -67,6 +69,7 @@ impl FlowEntry {
             last_report_bytes_stats: 0,
             last_report_bytes_web: 0,
             fin_seen: 0,
+            referenced: false,
             a_to_b_seq: TcpSeqTracker::new(),
             b_to_a_seq: TcpSeqTracker::new(),
         }
@@ -80,6 +83,7 @@ impl FlowEntry {
         bytes: u64,
         flags: Option<TcpFlags>,
     ) {
+        self.referenced = true;
         self.first_seen = self.first_seen.min(ts);
         self.last_seen = self.last_seen.max(ts);
         match direction {

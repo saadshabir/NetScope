@@ -1,6 +1,6 @@
 # Performance
 
-This page documents NetScope's offline benchmark system and its first profile-guided change. The saved reports are the source for measured numbers; Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
+This page documents NetScope's offline benchmark system and measured optimization passes. The saved reports are the source for measured numbers; Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
 
 - [Results and evidence](#results)
 - [Recreating workloads](#recreating-workloads)
@@ -10,7 +10,22 @@ This page documents NetScope's offline benchmark system and its first profile-gu
 
 ## Results
 
-The current [baseline](benchmarks/offline-20260926-baseline-checksummed/report.md) and [optimized](benchmarks/offline-20260926-checksummed/report.md) reports use the same checksummed PCAP hashes and configs across all 12 scenarios. Both save application source patches and harness copies alongside raw runs. Their reconstruction guides disclose omitted documentation, normalized diagnostic text, and published-file hashes; original source and binary fingerprints remain recorded. All runs reconciled their inputs and had zero offline dispatch drops. Supplemental repetitions retain noisy ranges rather than selecting the fastest run.
+### 2026-10-08 optimization pass
+
+This pass reduces flow bookkeeping and expiry scans, grows pooled packet buffers on demand, and collects full shutdown snapshots only for requested exports. The same checksummed one-million-packet high-cardinality trace was replayed on an Apple M4 with unlimited scale-mode flow storage and exports, stats, and dashboard disabled. Original and optimized binaries alternated within each repetition: one warm-up and seven measured runs per binary and worker count.
+
+| Workers | Before packets/s median [range] | After packets/s median [range] | Peak RSS MiB before → after (median) |
+| --- | ---: | ---: | ---: |
+| 2 | 4,172,555 [4,121,598–4,231,286] | 5,400,804 [5,335,073–5,485,181] | 653.36 → 348.66 |
+| 4 | 4,155,383 [4,126,331–4,404,437] | 5,473,383 [5,352,320–5,679,895] | 577.53 → 365.86 |
+
+All frames reconciled with zero dispatch drops or worker failures. All 183 Rust tests passed, and eight comparisons across full/scale storage and four workloads produced identical retained exports and accounting. These are local offline observations; they do not establish live-capture throughput or loss bounds. Wider full-suite timing ranges remain provisional.
+
+Baseline code is commit `99fb924`; optimized code is `dc4181c`. Use the [offline runner](#running-the-offline-suite) with `--packets 1000000` to repeat the workload. Raw measurements, source snapshots, and comparison scripts remain locally under `tmp/perf/optimization-20261008-{baseline,final,paired,archive}` and are excluded from the repository.
+
+### Earlier measurements
+
+The earlier checksummed [baseline](benchmarks/offline-20260926-baseline-checksummed/report.md) and [optimized](benchmarks/offline-20260926-checksummed/report.md) reports use the same PCAP hashes and configs across all 12 scenarios. Both save application source patches and harness copies alongside raw runs. Their reconstruction guides disclose omitted documentation, normalized diagnostic text, and published-file hashes; original source and binary fingerprints remain recorded. All runs reconciled their inputs and had zero offline dispatch drops. Supplemental repetitions retain noisy ranges rather than selecting the fastest run.
 
 The earlier baseline and optimized suites ran on the same Apple M4 host (10 logical CPUs, 16 GiB RAM, macOS 27, Rust 1.93.1). The environment probe could not identify the libpcap version and records it as unavailable. These suites used synthetic packets with zero checksums. Their application source is recoverable from the recorded commit and the saved [optimized application patch](benchmarks/offline-20260926-after/source-snapshot/application.patch), but the original dirty runner revisions were not retained. Treat these reports as historical measurements with incomplete harness provenance.
 
@@ -23,7 +38,7 @@ The earlier baseline and optimized suites ran on the same Apple M4 host (10 logi
 
 Profile sampling found frequent hash-map iterator folding while each pipeline worker selected top-flow candidates, including when both stats and dashboard output were disabled. Pipeline setup now disables heavy-hitter collection unless one of those consumers is enabled. The follow-up profile no longer samples that iterator-fold path; insertion and growth of the actual flow table remain visible. See the [baseline profile](benchmarks/offline-20260926-first/profiling/baseline-high-cardinality-5m-pipeline-w4/profile.json) and [follow-up profile](benchmarks/offline-20260926-after/profiling/high-cardinality-5m-pipeline-w4/profile.json).
 
-The table compares matching checksummed 100,000-packet runs on the same host. Ranges overlap, so these results do not support a reliable throughput-gain claim.
+The following historical table compares matching checksummed 100,000-packet runs on the same host. Ranges overlap, so those results do not support a reliable throughput-gain claim.
 
 | Scenario | Baseline packets/s median [range] | After packets/s median [range] | Median change |
 | --- | ---: | ---: | ---: |
@@ -177,9 +192,10 @@ Change one setting at a time and retain the run summary's `effective_config` alo
 
 ### Reducing memory use
 
-- Lower `flow.max_flows` (CLI: `--max-flows`) to reduce retained flows. Pipeline divides the budget among workers; pruning is periodic, so bursts can temporarily exceed it. `0` means unlimited.
+- Lower `flow.max_flows` (CLI: `--max-flows`) to reduce retained flows. Pipeline divides the budget among workers and enforces it before admitting new flows. `0` means unlimited.
 - Reduce `flow.timeout_secs` to expire flows sooner; `0` disables timeout removal. Removed flows require an expired-flow sink if they must remain in the investigation record.
 - Lower `packet_buffer` to retain fewer dashboard packets.
 - For large flow-count runs, disable deep TCP analysis (`analysis.rtt = false`, `analysis.retrans = false`, `analysis.out_of_order = false`) to use scale-mode flow storage.
+- Pipeline packet buffers start at at most 2 KiB and grow for larger captured frames. Requested final JSON/CSV exports still require materializing retained flow snapshots at shutdown; runs without those exports skip that work.
 
 The published peak-RSS measurements come from whole-process runs over deterministic PCAP workloads. They include parsing and the configured flow workload; they should not be read as isolated per-flow storage cost. Use high-cardinality manifests when comparing memory behavior, and retain the host and raw-run records.

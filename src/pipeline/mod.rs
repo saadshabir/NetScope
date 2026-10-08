@@ -157,6 +157,9 @@ pub struct PipelineConfig {
     pub web: WebConfig,
     /// Number of heavy-hitter candidates to track per worker tick.
     pub heavy_hitter_top_n: usize,
+    /// Collect final retained flows for JSON/CSV export. Run accounting and
+    /// dashboard ticks do not require a full shutdown snapshot.
+    pub collect_final_flows: bool,
     /// Alert JSONL path. No records are produced in pipeline mode because
     /// anomaly detection is rejected before capture starts.
     pub alerts_jsonl: Option<PathBuf>,
@@ -261,6 +264,7 @@ pub fn spawn(
         let analysis_cfg = config.analysis.clone();
         let web_cfg = config.web.clone();
         let heavy_hitter_top_n = config.heavy_hitter_top_n;
+        let collect_final_flows = config.collect_final_flows;
         let buffer_returner = buffer_returner.clone();
         let link_type = config.link_type;
         let offline = config.offline;
@@ -278,6 +282,7 @@ pub fn spawn(
                         analysis_cfg,
                         web_cfg,
                         heavy_hitter_top_n,
+                        collect_final_flows,
                         emit_expired_flows,
                     },
                     buffer_returner,

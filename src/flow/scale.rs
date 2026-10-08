@@ -14,7 +14,8 @@ pub(crate) struct ScaleFlowEntry {
     fin_seen: u8,
     tcp_state: u8,
     client: u8,
-    _pad: [u8; 5],
+    pub(crate) referenced: bool,
+    _pad: [u8; 4],
 }
 
 const SCALE_TCP_STATE_NONE: u8 = 7;
@@ -37,7 +38,8 @@ impl ScaleFlowEntry {
             fin_seen: 0,
             tcp_state: Self::encode_tcp_state(tcp_state),
             client: Self::encode_client(None),
-            _pad: [0; 5],
+            referenced: false,
+            _pad: [0; 4],
         }
     }
 
@@ -49,6 +51,7 @@ impl ScaleFlowEntry {
         bytes: u64,
         flags: Option<TcpFlags>,
     ) {
+        self.referenced = true;
         self.first_seen_ts = self.first_seen_ts.min(ts);
         self.last_seen_ts = self.last_seen_ts.max(ts);
         match direction {
