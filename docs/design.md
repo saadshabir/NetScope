@@ -20,11 +20,7 @@ flowchart LR
 
 Inline mode owns one flow table and one global anomaly detector. Pipeline mode routes both directions of a flow to the same worker, then merges worker summaries at shutdown. Offline reads block when queues fill, so file input is processed with backpressure. Live capture dispatch remains nonblocking; queue-full frames are counted as application dispatch drops. A capture PCAP is written before pipeline dispatch and can therefore contain frames absent from worker-side flows.
 
-Pooled packet buffers initially reserve at most 2 KiB each, grow for larger frames, and retain grown capacity within the pool's return limit. This changes allocation rather than capture snaplen or packet contents. Workers always send shutdown accounting; full retained-flow snapshots are collected only for requested final JSON/CSV exports.
-
 `flow.max_flows` is a total pipeline budget split among workers. A busy shard may evict flows while another has spare quota, and capacity is enforced before every new-flow insertion. A bounded second-chance clock evicts flows when a shard fills; timeout cleanup is separate and runs at most once per capture-time second. If the budget is below the requested worker count, NetScope reduces the active worker count so each shard receives a positive quota.
-
-The clock stores reference bits in the flow entries. Timeout cleanup removes entries in place and builds removal snapshots only for enabled sinks. A conservative lower bound on retained last-seen timestamps lets cleanup return without scanning when no flow can have timed out; admitting a new flow with an older timestamp lowers that bound.
 
 Both inline and pipeline offline expiry use a monotonic capture-time watermark. Idle worker ticks keep that watermark and do not compare historical packets with today's wall clock. Flow timestamps retain the earliest and latest observations, including out-of-order packets and captures spanning more than 50 days. Live workers also expire idle flows against wall time. To disable timeout removal in either mode, use `--flow-timeout-s 0`; the flow budget still applies.
 

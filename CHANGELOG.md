@@ -6,7 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Reproducible 2026-10-08 optimization evidence, alternating binary comparisons, and focused flow insertion, capacity-churn, and expiry benchmarks.
 - Output-inspection commands in the quickstart and a dashboard endpoint reference with health and authenticated metrics examples.
 - Remote dashboard TLS/auth configuration and run-summary field guidance.
 - Five concise reader-facing pages for quickstart, reference, design, performance, and tool comparison; the README now links to them and the synthetic PCAP investigations.
@@ -53,9 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- Flow tracking reuses canonical tuples and map-entry admission, stores clock references in entries, and skips expiry scans when no flow can expire.
-- Timeout removal runs in place and builds removed-flow snapshots only for enabled sinks.
-- Pipeline packet buffers start at at most 2 KiB and grow on demand; full shutdown flow snapshots are collected only for requested JSON/CSV exports.
+- Reduced flow bookkeeping and expiry work, added focused benchmarks, and lowered pipeline memory use with growable packet buffers and optional shutdown snapshots.
 - Consolidated the README and ten overlapping guides into five reader pages and the investigation guide; removed duplicate CLI tables and corrected local links.
 - Moved `scripts/perf/validate-web.sh` and `scripts/perf/perf-web.toml` to `scripts/smoke/dashboard.sh` and `scripts/smoke/dashboard.toml` so the manual live-dashboard check is not presented as a benchmark.
 - Replaced malformed `.gitignore` fences and broad patterns with explicit local build, benchmark, smoke, and trace rules.

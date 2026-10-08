@@ -10,7 +10,20 @@ This page documents NetScope's offline benchmark system and measured optimizatio
 
 ## Results
 
-The latest [2026-10-08 performance pass](benchmarks/optimization-20261008/report.md) reduces flow bookkeeping, skips expiry scans when no flow can expire, grows pooled packet buffers on demand, and avoids full shutdown snapshots when exports are disabled. In an alternating comparison of the original and final binaries over the same one-million-packet high-cardinality trace, median pipeline throughput increased by 29.4% with two workers and 31.7% with four. Median peak RSS fell from 653.36 to 348.66 MiB and from 577.53 to 365.86 MiB respectively. These are local unlimited-flow, scale-mode observations on the Apple M4 host; all runs processed every frame with zero dispatch drops. The report retains ranges, source reconstruction, individual measurements, microbenchmarks, and correctness checks. Full-suite comparisons with wider ranges remain provisional.
+### 2026-10-08 optimization pass
+
+This pass reduces flow bookkeeping and expiry scans, grows pooled packet buffers on demand, and collects full shutdown snapshots only for requested exports. The same checksummed one-million-packet high-cardinality trace was replayed on an Apple M4 with unlimited scale-mode flow storage and exports, stats, and dashboard disabled. Original and optimized binaries alternated within each repetition: one warm-up and seven measured runs per binary and worker count.
+
+| Workers | Before packets/s median [range] | After packets/s median [range] | Peak RSS MiB before → after (median) |
+| --- | ---: | ---: | ---: |
+| 2 | 4,172,555 [4,121,598–4,231,286] | 5,400,804 [5,335,073–5,485,181] | 653.36 → 348.66 |
+| 4 | 4,155,383 [4,126,331–4,404,437] | 5,473,383 [5,352,320–5,679,895] | 577.53 → 365.86 |
+
+All frames reconciled with zero dispatch drops or worker failures. All 183 Rust tests passed, and eight comparisons across full/scale storage and four workloads produced identical retained exports and accounting. These are local offline observations; they do not establish live-capture throughput or loss bounds. Wider full-suite timing ranges remain provisional.
+
+Baseline code is commit `99fb924`; optimized code is `dc4181c`. Use the [offline runner](#running-the-offline-suite) with `--packets 1000000` to repeat the workload. Raw measurements, source snapshots, and comparison scripts remain locally under `tmp/perf/optimization-20261008-{baseline,final,paired,archive}` and are excluded from the repository.
+
+### Earlier measurements
 
 The earlier checksummed [baseline](benchmarks/offline-20260926-baseline-checksummed/report.md) and [optimized](benchmarks/offline-20260926-checksummed/report.md) reports use the same PCAP hashes and configs across all 12 scenarios. Both save application source patches and harness copies alongside raw runs. Their reconstruction guides disclose omitted documentation, normalized diagnostic text, and published-file hashes; original source and binary fingerprints remain recorded. All runs reconciled their inputs and had zero offline dispatch drops. Supplemental repetitions retain noisy ranges rather than selecting the fastest run.
 
