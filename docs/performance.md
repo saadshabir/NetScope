@@ -1,6 +1,6 @@
 # Performance
 
-This page documents NetScope's offline benchmark system and its first profile-guided change. The saved reports are the source for measured numbers; Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
+This page documents NetScope's offline benchmark system and measured optimization passes. The saved reports are the source for measured numbers; Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
 
 - [Results and evidence](#results)
 - [Recreating workloads](#recreating-workloads)
@@ -10,7 +10,9 @@ This page documents NetScope's offline benchmark system and its first profile-gu
 
 ## Results
 
-The current [baseline](benchmarks/offline-20260926-baseline-checksummed/report.md) and [optimized](benchmarks/offline-20260926-checksummed/report.md) reports use the same checksummed PCAP hashes and configs across all 12 scenarios. Both save application source patches and harness copies alongside raw runs. Their reconstruction guides disclose omitted documentation, normalized diagnostic text, and published-file hashes; original source and binary fingerprints remain recorded. All runs reconciled their inputs and had zero offline dispatch drops. Supplemental repetitions retain noisy ranges rather than selecting the fastest run.
+The latest [2026-10-08 performance pass](benchmarks/optimization-20261008/report.md) reduces flow bookkeeping, skips expiry scans when no flow can expire, grows pooled packet buffers on demand, and avoids full shutdown snapshots when exports are disabled. In an alternating comparison of the original and final binaries over the same one-million-packet high-cardinality trace, median pipeline throughput increased by 29.4% with two workers and 31.7% with four. Median peak RSS fell from 653.36 to 348.66 MiB and from 577.53 to 365.86 MiB respectively. These are local unlimited-flow, scale-mode observations on the Apple M4 host; all runs processed every frame with zero dispatch drops. The report retains ranges, source reconstruction, individual measurements, microbenchmarks, and correctness checks. Full-suite comparisons with wider ranges remain provisional.
+
+The earlier checksummed [baseline](benchmarks/offline-20260926-baseline-checksummed/report.md) and [optimized](benchmarks/offline-20260926-checksummed/report.md) reports use the same PCAP hashes and configs across all 12 scenarios. Both save application source patches and harness copies alongside raw runs. Their reconstruction guides disclose omitted documentation, normalized diagnostic text, and published-file hashes; original source and binary fingerprints remain recorded. All runs reconciled their inputs and had zero offline dispatch drops. Supplemental repetitions retain noisy ranges rather than selecting the fastest run.
 
 The earlier baseline and optimized suites ran on the same Apple M4 host (10 logical CPUs, 16 GiB RAM, macOS 27, Rust 1.93.1). The environment probe could not identify the libpcap version and records it as unavailable. These suites used synthetic packets with zero checksums. Their application source is recoverable from the recorded commit and the saved [optimized application patch](benchmarks/offline-20260926-after/source-snapshot/application.patch), but the original dirty runner revisions were not retained. Treat these reports as historical measurements with incomplete harness provenance.
 
@@ -23,7 +25,7 @@ The earlier baseline and optimized suites ran on the same Apple M4 host (10 logi
 
 Profile sampling found frequent hash-map iterator folding while each pipeline worker selected top-flow candidates, including when both stats and dashboard output were disabled. Pipeline setup now disables heavy-hitter collection unless one of those consumers is enabled. The follow-up profile no longer samples that iterator-fold path; insertion and growth of the actual flow table remain visible. See the [baseline profile](benchmarks/offline-20260926-first/profiling/baseline-high-cardinality-5m-pipeline-w4/profile.json) and [follow-up profile](benchmarks/offline-20260926-after/profiling/high-cardinality-5m-pipeline-w4/profile.json).
 
-The table compares matching checksummed 100,000-packet runs on the same host. Ranges overlap, so these results do not support a reliable throughput-gain claim.
+The following historical table compares matching checksummed 100,000-packet runs on the same host. Ranges overlap, so those results do not support a reliable throughput-gain claim.
 
 | Scenario | Baseline packets/s median [range] | After packets/s median [range] | Median change |
 | --- | ---: | ---: | ---: |
@@ -177,9 +179,10 @@ Change one setting at a time and retain the run summary's `effective_config` alo
 
 ### Reducing memory use
 
-- Lower `flow.max_flows` (CLI: `--max-flows`) to reduce retained flows. Pipeline divides the budget among workers; pruning is periodic, so bursts can temporarily exceed it. `0` means unlimited.
+- Lower `flow.max_flows` (CLI: `--max-flows`) to reduce retained flows. Pipeline divides the budget among workers and enforces it before admitting new flows. `0` means unlimited.
 - Reduce `flow.timeout_secs` to expire flows sooner; `0` disables timeout removal. Removed flows require an expired-flow sink if they must remain in the investigation record.
 - Lower `packet_buffer` to retain fewer dashboard packets.
 - For large flow-count runs, disable deep TCP analysis (`analysis.rtt = false`, `analysis.retrans = false`, `analysis.out_of_order = false`) to use scale-mode flow storage.
+- Pipeline packet buffers start at at most 2 KiB and grow for larger captured frames. Requested final JSON/CSV exports still require materializing retained flow snapshots at shutdown; runs without those exports skip that work.
 
 The published peak-RSS measurements come from whole-process runs over deterministic PCAP workloads. They include parsing and the configured flow workload; they should not be read as isolated per-flow storage cost. Use high-cardinality manifests when comparing memory behavior, and retain the host and raw-run records.

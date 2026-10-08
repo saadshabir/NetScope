@@ -73,6 +73,138 @@ mod tests {
     use std::collections::VecDeque;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+    fn clock_test_frame(ipv6: bool, port: u16, reverse: bool) -> Vec<u8> {
+        let (src_port, dst_port) = if reverse { (80, port) } else { (port, 80) };
+        if !ipv6 {
+            let (src, dst) = if reverse {
+                ([10, 0, 0, 2], [10, 0, 0, 1])
+            } else {
+                ([10, 0, 0, 1], [10, 0, 0, 2])
+            };
+            return make_tcp_ethernet_frame(src, dst, src_port, dst_port, 1, 0, 0x10, &[]);
+        }
+        let a = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1).octets();
+        let b = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2).octets();
+        let (src, dst) = if reverse { (b, a) } else { (a, b) };
+        let mut frame = vec![0; 74];
+        frame[12..14].copy_from_slice(&0x86ddu16.to_be_bytes());
+        frame[14] = 0x60;
+        frame[18..20].copy_from_slice(&20u16.to_be_bytes());
+        frame[20] = 6;
+        frame[21] = 64;
+        frame[22..38].copy_from_slice(&src);
+        frame[38..54].copy_from_slice(&dst);
+        frame[54..56].copy_from_slice(&src_port.to_be_bytes());
+        frame[56..58].copy_from_slice(&dst_port.to_be_bytes());
+        frame[66] = 0x50;
+        frame[67] = 0x10;
+        frame
+    }
+
+    #[test]
+    fn clock_eviction_preserves_reobserved_flows_and_recovers_after_expiry() {
+        for deep in [false, true] {
+            for ipv6 in [false, true] {
+                let mut tracker = FlowTracker::new(60.0, 3, deep, deep, deep);
+                let mut events = Vec::new();
+                // Filling the clock gives each flow one chance. The fourth
+                // insertion clears those references and evicts the first.
+                for (port, reverse) in [
+                    (1001, false),
+                    (1002, false),
+                    (1003, false),
+                    (1004, false),
+                    (1002, true),
+                    (1005, false),
+                ] {
+                    let frame = clock_test_frame(ipv6, port, reverse);
+                    let parsed = parse_packet_with_linktype(&frame, LinkType::Ethernet).unwrap();
+                    tracker.observe_collect(1.0, frame.len() as u64, &parsed, &mut events);
+                    assert!(tracker.len() <= 3);
+                }
+                assert_eq!(tracker.stats().created, 5);
+                assert_eq!(tracker.stats().evicted, 2);
+                let evicted: Vec<_> = events
+                    .iter()
+                    .map(|event| event.flow.endpoint_a.port)
+                    .collect();
+                assert_eq!(evicted, [1001, 1003]);
+                let retained = tracker
+                    .snapshot()
+                    .into_iter()
+                    .find(|flow| flow.endpoint_a.port == 1002)
+                    .unwrap();
+                assert_eq!(retained.packets_a_to_b, 1);
+                assert_eq!(retained.packets_b_to_a, 1);
+
+                events.clear();
+                assert_eq!(tracker.maybe_expire_collect(120.0, &mut events), 3);
+                assert_eq!(events.len(), 3);
+                assert!(
+                    events
+                        .iter()
+                        .all(|event| event.reason == ExpiredFlowReason::Timeout)
+                );
+                assert_eq!(tracker.stats().expired, 3);
+                // Reusing a previously expired key must start a fresh clock
+                // entry; later capacity pressure must still evict one flow.
+                for port in 1002..=1005 {
+                    let frame = clock_test_frame(ipv6, port, false);
+                    let parsed = parse_packet_with_linktype(&frame, LinkType::Ethernet).unwrap();
+                    tracker.observe(121.0, frame.len() as u64, &parsed);
+                }
+                assert_eq!(tracker.len(), 3);
+                assert_eq!(tracker.stats().created, 9);
+                assert_eq!(tracker.stats().evicted, 3);
+            }
+        }
+    }
+
+    #[test]
+    fn unlimited_flow_admission_counts_each_bidirectional_flow_once() {
+        for deep in [false, true] {
+            let mut tracker = FlowTracker::new(60.0, 0, deep, deep, deep);
+            for ipv6 in [false, true] {
+                for (port, reverse) in [(1001, false), (1001, true), (1002, false)] {
+                    let frame = clock_test_frame(ipv6, port, reverse);
+                    let parsed = parse_packet_with_linktype(&frame, LinkType::Ethernet).unwrap();
+                    tracker.observe(1.0, frame.len() as u64, &parsed);
+                }
+            }
+            assert_eq!(tracker.len(), 4);
+            assert_eq!(tracker.stats().created, 4);
+            assert_eq!(tracker.stats().evicted, 0);
+            assert_eq!(tracker.maybe_expire(120.0), 4);
+            assert_eq!(tracker.stats().expired, 4);
+        }
+    }
+
+    #[test]
+    fn expiry_bound_accounts_for_old_insertions_and_the_timeout_boundary() {
+        for deep in [false, true] {
+            let mut tracker = FlowTracker::new(60.0, 0, deep, deep, deep);
+            let recent = clock_test_frame(false, 1001, false);
+            let old = clock_test_frame(true, 1002, false);
+            tracker.observe(
+                100.0,
+                54,
+                &parse_packet_with_linktype(&recent, LinkType::Ethernet).unwrap(),
+            );
+            assert_eq!(tracker.maybe_expire(101.0), 0);
+            tracker.observe(
+                1.0,
+                74,
+                &parse_packet_with_linktype(&old, LinkType::Ethernet).unwrap(),
+            );
+            assert_eq!(tracker.maybe_expire(102.0), 1);
+            assert_eq!(tracker.snapshot()[0].endpoint_a.port, 1001);
+            assert_eq!(tracker.maybe_expire(160.0), 0);
+            // Checks are still throttled to one per capture-time second.
+            assert_eq!(tracker.maybe_expire(161.0), 1);
+            assert!(tracker.is_empty());
+        }
+    }
+
     #[test]
     fn flow_budget_holds_for_constant_and_backward_timestamps() {
         for deep in [false, true] {
@@ -425,6 +557,7 @@ mod tests {
 
     #[test]
     fn scale_flow_entry_tracks_compact_state_and_deltas() {
+        assert_eq!(std::mem::size_of::<ScaleFlowEntry>(), 64);
         let mut entry = ScaleFlowEntry::new(1.0, FlowProtocol::Tcp);
         entry.observe(
             2.0,

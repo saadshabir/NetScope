@@ -1414,8 +1414,8 @@ fn run_capture_pipeline(
     web_handle: Option<&web::server::WebHandle>,
     accounting: &mut RunAccounting,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Use the full snaplen as the pool buffer size so every captured packet
-    // fits without reallocation. Fall back to 65535 if snaplen is 0 (unset).
+    // The pool starts with small buffers and grows them for larger frames.
+    // Snaplen controls how much grown-buffer capacity it retains.
     let packet_buf_size = match config.capture.snaplen {
         s if s > 0 => s as usize,
         _ => 65535,
@@ -1443,6 +1443,8 @@ fn run_capture_pipeline(
         stats: config.stats.clone(),
         web: config.web.clone(),
         heavy_hitter_top_n: stats_top_n.max(web_top_n),
+        collect_final_flows: config.output.export_json.is_some()
+            || config.output.export_csv.is_some(),
         alerts_jsonl: config.analysis.alerts_jsonl.clone(),
         expired_flows_jsonl: config.output.expired_flows_jsonl.clone(),
         expired_flows_csv: config.output.expired_flows_csv.clone(),
