@@ -168,7 +168,13 @@ impl CaptureSource {
         match self {
             CaptureSource::Live(cap) => match cap.next_packet() {
                 Ok(packet) => Ok(CaptureRead::Packet(packet)),
-                Err(pcap::Error::TimeoutExpired) => Ok(CaptureRead::Idle),
+                Err(pcap::Error::TimeoutExpired) => {
+                    // Linux live handles are nonblocking; avoid spinning when
+                    // no packet is available while keeping shutdown responsive.
+                    #[cfg(target_os = "linux")]
+                    std::thread::sleep(Duration::from_millis(1));
+                    Ok(CaptureRead::Idle)
+                }
                 Err(err) => Err(err),
             },
             CaptureSource::Offline(cap) => match cap.next_packet() {

@@ -108,6 +108,11 @@ pub fn open_capture(config: &CaptureConfig) -> Result<Capture<Active>, CaptureEr
         cap.filter(filter, true).map_err(CaptureError::Pcap)?;
     }
 
+    // Linux's packet-buffer timeout does not guarantee that an idle read
+    // returns. Nonblocking reads let the caller check shutdown and timers.
+    #[cfg(target_os = "linux")]
+    let cap = cap.setnonblock().map_err(CaptureError::Pcap)?;
+
     tracing::info!(
         interface = %device_name,
         promiscuous = config.promiscuous,

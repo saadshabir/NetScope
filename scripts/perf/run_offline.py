@@ -318,7 +318,7 @@ def time_adapter() -> tuple[list[str], str]:
         return ["/usr/bin/time", "-l", "-o"], "macos-bsd-time-l"
     if sys.platform.startswith("linux"):
         version = command_output(["/usr/bin/time", "--version"])
-        if version and "GNU time" in version:
+        if version and "gnu time" in version.lower():
             return ["/usr/bin/time", "-v", "-o"], "linux-gnu-time-v"
     raise RuntimeError(f"no supported /usr/bin/time resource adapter for {sys.platform}")
 
