@@ -1,2 +1,0 @@
-   Compiling netscope v0.1.0 (/Users/saad/Desktop/Main/Personal/Projects/NetScope)
-    Finished `release` profile [optimized] target(s) in 6.51s

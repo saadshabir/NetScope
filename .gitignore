@@ -2,10 +2,9 @@
 /target/
 
 # Local benchmark and generated trace output. Checked-in examples/pcaps remain tracked.
-/tmp/bench/
-/tmp/perf/
-/tmp/smoke/
-/tmp/*.pcap
+/tmp/
+/docs/benchmarks/offline-*/
+/docs/benchmarks/optimization-*/
 
 # Local secrets and platform metadata
 .env

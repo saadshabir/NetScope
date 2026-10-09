@@ -74,6 +74,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- Historical offline benchmark bundles containing local filesystem paths; the benchmark tools and synthetic inputs remain available.
 - Ten superseded standalone documentation pages and the duplicated full CLI appendix table.
 - The completed `docs/streamlining-plan.md`; its release history is retained here. The Linux live-loss matrix is outside the current release scope, and no live-loss figure is published.
 - The developer-only `--synthetic-flows` CLI option and its now-unused `src/memory.rs`; flow insertion remains only as a `#[cfg(test)]` helper.

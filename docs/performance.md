@@ -1,8 +1,8 @@
 # Performance
 
-This page documents NetScope's offline benchmark system and measured optimization passes. The saved reports are the source for measured numbers; Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
+This page documents NetScope's offline benchmark system and summarizes historical optimization measurements. Raw benchmark artifacts are no longer retained in this checkout. Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
 
-- [Results and evidence](#results)
+- [Historical results](#results)
 - [Recreating workloads](#recreating-workloads)
 - [Running the offline suite](#running-the-offline-suite)
 - [Live capture and packet loss](#live-capture-and-packet-loss)
@@ -21,32 +21,11 @@ This pass reduces flow bookkeeping and expiry scans, grows pooled packet buffers
 
 All frames reconciled with zero dispatch drops or worker failures. All 183 Rust tests passed, and eight comparisons across full/scale storage and four workloads produced identical retained exports and accounting. These are local offline observations; they do not establish live-capture throughput or loss bounds. Wider full-suite timing ranges remain provisional.
 
-Baseline code is commit `99fb924`; optimized code is `dc4181c`. Use the [offline runner](#running-the-offline-suite) with `--packets 1000000` to repeat the workload. Raw measurements, source snapshots, and comparison scripts remain locally under `tmp/perf/optimization-20261008-{baseline,final,paired,archive}` and are excluded from the repository.
+Baseline code is commit `99fb924`; optimized code is `dc4181c`. Use the [offline runner](#running-the-offline-suite) with `--packets 1000000` to repeat the workload. The original raw measurements, source snapshots, and comparison scripts have been removed; rerun the suite to collect evidence for a new comparison.
 
 ### Earlier measurements
 
-The earlier checksummed [baseline](benchmarks/offline-20260926-baseline-checksummed/report.md) and [optimized](benchmarks/offline-20260926-checksummed/report.md) reports use the same PCAP hashes and configs across all 12 scenarios. Both save application source patches and harness copies alongside raw runs. Their reconstruction guides disclose omitted documentation, normalized diagnostic text, and published-file hashes; original source and binary fingerprints remain recorded. All runs reconciled their inputs and had zero offline dispatch drops. Supplemental repetitions retain noisy ranges rather than selecting the fastest run.
-
-The earlier baseline and optimized suites ran on the same Apple M4 host (10 logical CPUs, 16 GiB RAM, macOS 27, Rust 1.93.1). The environment probe could not identify the libpcap version and records it as unavailable. These suites used synthetic packets with zero checksums. Their application source is recoverable from the recorded commit and the saved [optimized application patch](benchmarks/offline-20260926-after/source-snapshot/application.patch), but the original dirty runner revisions were not retained. Treat these reports as historical measurements with incomplete harness provenance.
-
-- [Checksummed baseline report and raw records](benchmarks/offline-20260926-baseline-checksummed/report.md)
-- [Checksummed optimized report and raw records](benchmarks/offline-20260926-checksummed/report.md)
-- [Historical zero-checksum baseline report](benchmarks/offline-20260926-first/report.md)
-- [Historical zero-checksum optimized report](benchmarks/offline-20260926-after/report.md)
-- [Checksummed 10,000-packet smoke PCAPs and manifests](benchmarks/workloads-10k-smoke/)
-- [Historical zero-checksum generator](benchmarks/legacy-workloads-v1.py) for regenerating the original report inputs
-
-Profile sampling found frequent hash-map iterator folding while each pipeline worker selected top-flow candidates, including when both stats and dashboard output were disabled. Pipeline setup now disables heavy-hitter collection unless one of those consumers is enabled. The follow-up profile no longer samples that iterator-fold path; insertion and growth of the actual flow table remain visible. See the [baseline profile](benchmarks/offline-20260926-first/profiling/baseline-high-cardinality-5m-pipeline-w4/profile.json) and [follow-up profile](benchmarks/offline-20260926-after/profiling/high-cardinality-5m-pipeline-w4/profile.json).
-
-The following historical table compares matching checksummed 100,000-packet runs on the same host. Ranges overlap, so those results do not support a reliable throughput-gain claim.
-
-| Scenario | Baseline packets/s median [range] | After packets/s median [range] | Median change |
-| --- | ---: | ---: | ---: |
-| High-cardinality, pipeline, 2 workers | 1,294,230 [1,288,413–1,345,313] | 1,315,012 [1,293,467–1,348,446] | +1.6% |
-| High-cardinality, pipeline, 4 workers | 1,322,388 [1,291,487–1,353,950] | 1,336,575 [1,289,040–2,471,513] | +1.1% |
-| Mixed, pipeline, 2 workers | 1,319,880 [1,290,299–1,449,431] | 1,294,928 [1,292,356–1,343,547] | -1.9% |
-
-All offline runs reconciled generated input counts with the final summary and recorded zero pipeline dispatch drops and worker failures. These file-replay results say nothing about packets dropped before a PCAP was created. The dashboard probe measures server-to-local-WebSocket delivery, frame cadence, and sequence gaps; it does not measure browser rendering or paint latency. Several repeat batches showed wide run-to-run or batch-to-batch variation. Both reports retain every run and mark pooled spreads above 10% as provisional; neither selects the fastest repetition.
+The September benchmark bundles and profiling output have been removed because they included local filesystem paths. Generate fresh runs with the commands below. [Checksummed 10,000-packet smoke PCAPs and manifests](benchmarks/workloads-10k-smoke/) remain available as synthetic inputs.
 
 ## Recreating workloads
 
@@ -125,7 +104,7 @@ python3 scripts/perf/repeat_scenarios.py \
   --warmups 1
 ```
 
-If the saved binary has moved, add `--binary <PATH>` to the repeat command. Its SHA-256 must match the recorded binary; otherwise run a new suite. Historical build paths in the published reports are normalized labels, not guaranteed local locations.
+If the saved binary has moved, add `--binary <PATH>` to the repeat command. Its SHA-256 must match the recorded binary; otherwise run a new suite.
 
 The benchmark scripts are separate from the live-capture/drop validation. A PCAP run cannot measure kernel or interface loss.
 
@@ -198,4 +177,4 @@ Change one setting at a time and retain the run summary's `effective_config` alo
 - For large flow-count runs, disable deep TCP analysis (`analysis.rtt = false`, `analysis.retrans = false`, `analysis.out_of_order = false`) to use scale-mode flow storage.
 - Pipeline packet buffers start at at most 2 KiB and grow for larger captured frames. Requested final JSON/CSV exports still require materializing retained flow snapshots at shutdown; runs without those exports skip that work.
 
-The published peak-RSS measurements come from whole-process runs over deterministic PCAP workloads. They include parsing and the configured flow workload; they should not be read as isolated per-flow storage cost. Use high-cardinality manifests when comparing memory behavior, and retain the host and raw-run records.
+The historical peak-RSS measurements above came from whole-process runs over deterministic PCAP workloads. They include parsing and the configured flow workload; they should not be read as isolated per-flow storage cost. Use high-cardinality manifests when comparing memory behavior, and retain the host and raw-run records for new measurements.
