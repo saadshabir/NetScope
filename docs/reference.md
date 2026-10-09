@@ -43,6 +43,8 @@ Flow JSON is an array of records with `protocol`, `endpoint_a`/`endpoint_b` (`ip
 
 Input PCAPs, the config file, TLS/auth files, and all outputs must have distinct file identities. Validation rejects output aliases through relative paths, symlinks, hard links, and the rotated PCAP filename namespace before opening writers.
 
+On Unix, outputs are opened with mode `0600` and existing outputs are restricted to the same mode. Writers reject symlinks, hard links, special files, and files owned by another user before truncating or appending. Rotated PCAP segments must be new files. Use output directories you control; parent directory symlinks are still resolved normally.
+
 `first_seen` and `last_seen` are Unix seconds from the earliest and latest capture timestamps; expired-record `ts` is the removal time in Unix seconds. Flow byte counts use original frame wire lengths, including headers, rather than captured payload sizes. `avg_bps` is bits per second over the observed flow duration and is zero for a zero-duration flow. `--flow-timeout-s 0` disables timeout removal, while `--max-flows 0` disables budget eviction. See [processing modes](design.md#processing-modes) for expiry timing.
 
 Alert JSONL schema version 1 includes `ts`, `kind`, optional source/target addresses and target port, `window_secs`, configured `thresholds`, observed counts, and a description. The threshold and observed objects use `syn_count`, `unique_sources`, `unique_ports`, and `unique_hosts`; fields that do not apply to that alert kind are null.
@@ -89,7 +91,11 @@ curl -fsS http://127.0.0.1:8080/metrics
 
 Capture metrics update on dashboard ticks; they can lag behind packet processing. Use the final run summary for reconciled accounting and unavailable-counter semantics. HTTP Basic auth and TLS apply to every endpoint when enabled.
 
+The dashboard allows up to 32 WebSocket connections. Client messages and frames are limited to 4 KiB, with 60 requests per second per connection; clients exceeding these limits disconnect. Sends time out after five seconds. When ticks are delayed or dropped, queued dashboard samples are capped at 8,192 packets and 1,024 alerts; excess samples are omitted from the dashboard. Capture accounting and file outputs are unaffected.
+
 ## Remote dashboard
+
+Binding beyond loopback requires both TLS and HTTP Basic authentication. Unsafe remote configurations fail validation before capture or output creation.
 
 Save this as `dashboard.toml`, replacing `capture.example` with the hostname or address used in your browser, and using existing PEM certificate/key files and a password file readable by NetScope:
 

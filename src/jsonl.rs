@@ -10,7 +10,7 @@ pub struct JsonlSink {
 
 impl JsonlSink {
     pub fn new(path: &Path) -> Result<Self, std::io::Error> {
-        let file = File::create(path)?;
+        let file = crate::output_file::create(path)?;
         Ok(JsonlSink {
             writer: BufWriter::new(file),
         })

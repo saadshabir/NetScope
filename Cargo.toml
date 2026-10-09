@@ -51,6 +51,9 @@ rust-embed = { version = "8", features = ["mime-guess"] }
 mime_guess = "2"
 base64 = "0.22"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(not(unix))'.dependencies]
 same-file = "1"
 

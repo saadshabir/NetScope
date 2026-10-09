@@ -7,6 +7,7 @@ pub mod display;
 pub mod flow;
 pub mod jsonl;
 pub mod metrics;
+pub mod output_file;
 pub mod packet_format;
 pub mod pipeline;
 pub mod protocol;

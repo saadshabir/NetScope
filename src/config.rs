@@ -331,6 +331,12 @@ impl WebConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        let host = self.bind.trim_start_matches('[').trim_end_matches(']');
+        let loopback = host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback());
+        Self::validate_remote_access(loopback, self.tls.enabled, self.auth.enabled)?;
         crate::web::origin::validate(
             &self.bind,
             self.port,
@@ -347,6 +353,9 @@ impl WebConfig {
         }
 
         if self.auth.enabled {
+            if self.auth.username.contains(':') {
+                return Err("web.auth.username cannot contain ':'".into());
+            }
             if self.auth.username.trim().is_empty() {
                 return Err("web.auth.username is required when web.auth.enabled = true".into());
             }
@@ -375,6 +384,20 @@ impl WebConfig {
             }
         }
 
+        Ok(())
+    }
+
+    pub(crate) fn validate_remote_access(
+        loopback: bool,
+        tls: bool,
+        auth: bool,
+    ) -> Result<(), String> {
+        if !loopback && (!tls || !auth) {
+            return Err(
+                "a non-loopback dashboard requires both web.tls.enabled and web.auth.enabled"
+                    .into(),
+            );
+        }
         Ok(())
     }
 }
@@ -475,6 +498,62 @@ mod tests {
     fn web_validate_defaults() {
         let web = WebConfig::default();
         assert!(web.validate().is_ok());
+    }
+
+    #[test]
+    fn remote_dashboard_requires_tls_and_authentication() {
+        for bind in ["0.0.0.0", "[::]", "192.0.2.1", "capture.example"] {
+            for (tls, auth) in [(false, false), (true, false), (false, true), (true, true)] {
+                let web = WebConfig {
+                    bind: bind.into(),
+                    tls: WebTlsConfig {
+                        enabled: tls,
+                        cert_path: Some("cert.pem".into()),
+                        key_path: Some("key.pem".into()),
+                    },
+                    auth: WebAuthConfig {
+                        enabled: auth,
+                        username: "operator".into(),
+                        password: Some("secret".into()),
+                        password_file: None,
+                    },
+                    ..WebConfig::default()
+                };
+                assert_eq!(
+                    web.validate().is_ok(),
+                    tls && auth,
+                    "{bind}: TLS={tls}, auth={auth}"
+                );
+            }
+        }
+        for bind in ["localhost", "127.0.0.1", "127.0.0.2", "[::1]"] {
+            assert!(
+                WebConfig {
+                    bind: bind.into(),
+                    ..WebConfig::default()
+                }
+                .validate()
+                .is_ok()
+            );
+        }
+    }
+
+    #[test]
+    fn basic_auth_rejects_a_username_that_cannot_be_encoded() {
+        let web = WebConfig {
+            auth: WebAuthConfig {
+                enabled: true,
+                username: "operator:admin".into(),
+                password: Some("secret".into()),
+                password_file: None,
+            },
+            ..WebConfig::default()
+        };
+        assert!(
+            web.validate()
+                .unwrap_err()
+                .contains("username cannot contain")
+        );
     }
 
     #[test]

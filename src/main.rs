@@ -124,10 +124,43 @@ impl CaptureSource {
     fn savefile<P: AsRef<std::path::Path>>(
         &mut self,
         path: P,
+        exclusive: bool,
     ) -> Result<pcap::Savefile, pcap::Error> {
-        match self {
-            CaptureSource::Live(cap) => cap.savefile(path),
-            CaptureSource::Offline(cap) => cap.savefile(path),
+        #[cfg(unix)]
+        {
+            use std::os::fd::IntoRawFd;
+            let path = path.as_ref();
+            let file = if exclusive {
+                netscope::output_file::create_new(path)
+            } else {
+                netscope::output_file::create(path)
+            }
+            .map_err(|err| {
+                pcap::Error::PcapError(format!("cannot open {}: {err}", path.display()))
+            })?;
+            let fd = file.into_raw_fd();
+            // SAFETY: ownership of the checked, writable file descriptor is
+            // transferred to libpcap; no Rust File can close or reuse it.
+            let result = unsafe {
+                match self {
+                    CaptureSource::Live(cap) => cap.savefile_raw_fd(fd),
+                    CaptureSource::Offline(cap) => cap.savefile_raw_fd(fd),
+                }
+            };
+            // fdopen leaves ownership with the caller if it fails.
+            if matches!(result, Err(pcap::Error::InvalidRawFd)) {
+                // SAFETY: fdopen failed, so this descriptor is still ours.
+                unsafe { libc::close(fd) };
+            }
+            result
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = exclusive;
+            match self {
+                CaptureSource::Live(cap) => cap.savefile(path),
+                CaptureSource::Offline(cap) => cap.savefile(path),
+            }
         }
     }
 
@@ -546,7 +579,7 @@ impl RotatingSavefile {
                 .map(|(segment, _)| segment.saturating_add(1))
                 .unwrap_or(1);
             let path = Self::segment_path(base_path, first_segment);
-            let savefile = cap.savefile(&path)?;
+            let savefile = cap.savefile(&path, true)?;
             let mut segment_paths: VecDeque<PathBuf> = existing_segments
                 .into_iter()
                 .map(|(_, path)| path)
@@ -565,7 +598,7 @@ impl RotatingSavefile {
             writer.prune_old_segments(rotation.max_files);
             Ok(writer)
         } else {
-            let savefile = cap.savefile(base_path)?;
+            let savefile = cap.savefile(base_path, false)?;
             Ok(Self {
                 base_path: base_path.to_path_buf(),
                 rotation,
@@ -611,7 +644,7 @@ impl RotatingSavefile {
         self.savefile.flush()?;
         self.current_segment = self.current_segment.saturating_add(1);
         let next_path = Self::segment_path(&self.base_path, self.current_segment);
-        self.savefile = cap.savefile(&next_path)?;
+        self.savefile = cap.savefile(&next_path, true)?;
         self.current_bytes = SAVEFILE_GLOBAL_HEADER_BYTES;
         self.rotate_pending = false;
         self.segment_paths.push_back(next_path);
