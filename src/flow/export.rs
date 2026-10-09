@@ -1,5 +1,5 @@
 use super::{ExpiredFlowEvent, FlowSnapshot};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
@@ -17,11 +17,8 @@ impl std::fmt::Debug for ExpiredFlowCsvSink {
 
 impl ExpiredFlowCsvSink {
     pub fn new(path: &Path) -> Result<Self, std::io::Error> {
-        let is_empty = match std::fs::metadata(path) {
-            Ok(metadata) => metadata.len() == 0,
-            Err(_) => true,
-        };
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let file = crate::output_file::append(path)?;
+        let is_empty = file.metadata()?.len() == 0;
         let mut writer = BufWriter::new(file);
         if is_empty {
             write_expired_flow_csv_header(&mut writer)?;
@@ -43,7 +40,7 @@ pub fn write_flow_json(
     path: &Path,
     flows: &[FlowSnapshot],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let file = File::create(path)?;
+    let file = crate::output_file::create(path)?;
     serde_json::to_writer_pretty(file, flows)?;
     Ok(())
 }
@@ -52,7 +49,7 @@ pub fn write_flow_csv(
     path: &Path,
     flows: &[FlowSnapshot],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let file = File::create(path)?;
+    let file = crate::output_file::create(path)?;
     let mut writer = BufWriter::new(file);
     write_flow_csv_to_writer(&mut writer, flows)?;
     Ok(())

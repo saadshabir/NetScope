@@ -201,8 +201,9 @@ impl RunSummary {
 }
 
 pub fn write_json(path: &Path, summary: &RunSummary) -> Result<(), std::io::Error> {
+    use std::io::Write;
     let encoded = serde_json::to_vec_pretty(summary).map_err(std::io::Error::other)?;
-    std::fs::write(path, encoded)
+    crate::output_file::create(path)?.write_all(&encoded)
 }
 
 pub fn source_description(read_pcap: Option<&Path>, interface: Option<&str>) -> String {

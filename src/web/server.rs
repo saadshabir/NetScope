@@ -22,8 +22,16 @@ use axum::{
 use axum_server::tls_rustls::RustlsConfig;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use rust_embed::Embed;
-use std::{path::PathBuf, sync::Arc};
-use tokio::sync::{RwLock, broadcast, mpsc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
+use tokio::sync::{RwLock, Semaphore, broadcast, mpsc};
+use tokio::time::Instant;
+
+const MAX_WS_CLIENTS: usize = 32;
+const MAX_WS_REQUEST_BYTES: usize = 4096;
+const MAX_WS_REQUESTS_PER_SECOND: u32 = 60;
+const WS_SEND_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_PENDING_PACKETS: usize = 8192;
+const MAX_PENDING_ALERTS: usize = 1024;
 
 use super::messages::{
     AlertMsg, CaptureEvent, Frame, PacketDetail, PacketSample, WsClientMsg, WsServerMsg,
@@ -60,6 +68,7 @@ pub struct AppState {
     /// Optional HTTP Basic auth credentials.
     basic_auth: Option<BasicAuthCredentials>,
     origin_policy: crate::web::origin::DashboardPolicy,
+    ws_clients: Arc<Semaphore>,
 }
 
 #[derive(Debug, Clone)]
@@ -130,11 +139,17 @@ pub fn start(config: WebServerConfig) -> Result<WebHandle, std::io::Error> {
     };
 
     let (event_tx, event_rx) = mpsc::channel::<CaptureEvent>(4096);
-    let (broadcast_tx, _) = broadcast::channel::<BroadcastFrame>(1024);
+    let (broadcast_tx, _) = broadcast::channel::<BroadcastFrame>(16);
 
     let bind_addr = format!("{}:{}", bind, port);
     let listener = std::net::TcpListener::bind(&bind_addr)?;
     listener.set_nonblocking(true)?;
+    crate::config::WebConfig::validate_remote_access(
+        listener.local_addr()?.ip().is_loopback(),
+        rustls_config.is_some(),
+        auth.is_some(),
+    )
+    .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
 
     let state = Arc::new(AppState {
         broadcast_tx: broadcast_tx.clone(),
@@ -152,6 +167,7 @@ pub fn start(config: WebServerConfig) -> Result<WebHandle, std::io::Error> {
             username: auth.username,
             password: auth.password,
         }),
+        ws_clients: Arc::new(Semaphore::new(MAX_WS_CLIENTS)),
     });
 
     // Spawn a dedicated thread with its own tokio runtime
@@ -246,14 +262,18 @@ async fn ingest_task(mut rx: mpsc::Receiver<CaptureEvent>, state: Arc<AppState>)
                 broadcast_frame(&state, frame_seq, frame).await;
             }
             CaptureEvent::Packet(sample) => {
-                pending_packets.push(sample);
+                if pending_packets.len() < MAX_PENDING_PACKETS {
+                    pending_packets.push(sample);
+                }
             }
             CaptureEvent::PacketStored(stored) => {
                 let mut store = state.packet_store.write().await;
                 store.push(stored);
             }
             CaptureEvent::Alert(alert) => {
-                pending_alerts.push(alert);
+                if pending_alerts.len() < MAX_PENDING_ALERTS {
+                    pending_alerts.push(alert);
+                }
             }
         }
     }
@@ -321,7 +341,16 @@ async fn metrics_handler() -> Response {
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_ws(socket, state))
+    let Ok(permit) = state.ws_clients.clone().try_acquire_owned() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    ws.read_buffer_size(MAX_WS_REQUEST_BYTES)
+        .max_message_size(MAX_WS_REQUEST_BYTES)
+        .max_frame_size(MAX_WS_REQUEST_BYTES)
+        .on_upgrade(move |socket| async move {
+            let _permit = permit;
+            handle_ws(socket, state).await;
+        })
 }
 
 async fn auth_middleware(
@@ -410,15 +439,51 @@ fn unauthorized_response() -> Response {
     }
 }
 
+struct RequestBudget {
+    window_start: Instant,
+    remaining: u32,
+}
+
+impl RequestBudget {
+    fn new(now: Instant) -> Self {
+        Self {
+            window_start: now,
+            remaining: MAX_WS_REQUESTS_PER_SECOND,
+        }
+    }
+
+    fn admit(&mut self, now: Instant) -> bool {
+        if now.duration_since(self.window_start) >= Duration::from_secs(1) {
+            self.window_start = now;
+            self.remaining = MAX_WS_REQUESTS_PER_SECOND;
+        }
+        if self.remaining == 0 {
+            return false;
+        }
+        self.remaining -= 1;
+        true
+    }
+}
+
+async fn send_ws(socket: &mut WebSocket, message: Message) -> Result<(), ()> {
+    tokio::time::timeout(WS_SEND_TIMEOUT, socket.send(message))
+        .await
+        .map_err(|_| ())?
+        .map_err(|_| ())
+}
+
 async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
     tracing::info!("ws client connected");
+    let mut request_budget = RequestBudget::new(Instant::now());
     // Send hello
     let hello = WsServerMsg::Hello {
         version: env!("CARGO_PKG_VERSION").to_string(),
         tick_ms: state.tick_ms,
     };
     if let Ok(json) = serde_json::to_string(&hello)
-        && socket.send(Message::Text(json.into())).await.is_err()
+        && send_ws(&mut socket, Message::Text(json.into()))
+            .await
+            .is_err()
     {
         tracing::debug!("ws client disconnected during hello send");
         return;
@@ -431,10 +496,12 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
     // Send the latest frame so newly connected clients start from current state.
     if let Some(frame) = { state.latest_frame.read().await.clone() } {
         last_sent_frame_seq = frame.frame_seq;
-        if socket
-            .send(Message::Text(frame.json.as_ref().to_owned().into()))
-            .await
-            .is_err()
+        if send_ws(
+            &mut socket,
+            Message::Text(frame.json.as_ref().to_owned().into()),
+        )
+        .await
+        .is_err()
         {
             tracing::debug!("ws client disconnected during initial frame send");
             return;
@@ -451,8 +518,7 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
                             continue;
                         }
                         last_sent_frame_seq = msg.frame_seq.or(last_sent_frame_seq);
-                        if socket
-                            .send(Message::Text(msg.json.as_ref().to_owned().into()))
+                        if send_ws(&mut socket, Message::Text(msg.json.as_ref().to_owned().into()))
                             .await
                             .is_err()
                         {
@@ -470,8 +536,7 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
                                 continue;
                             }
                             last_sent_frame_seq = frame.frame_seq.or(last_sent_frame_seq);
-                            if socket
-                                .send(Message::Text(frame.json.as_ref().to_owned().into()))
+                            if send_ws(&mut socket, Message::Text(frame.json.as_ref().to_owned().into()))
                                 .await
                                 .is_err()
                             {
@@ -485,6 +550,12 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
             }
             // Handle messages from the client
             result = socket.recv() => {
+                if result.as_ref().is_some_and(|message| message.is_ok())
+                    && !request_budget.admit(Instant::now())
+                {
+                    tracing::debug!("ws client exceeded request rate limit");
+                    break;
+                }
                 match result {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<WsClientMsg>(&text) {
@@ -505,7 +576,7 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
                                     };
                                     drop(store);
                                     if let Ok(json) = serde_json::to_string(&response)
-                                        && socket.send(Message::Text(json.into())).await.is_err() {
+                                        && send_ws(&mut socket, Message::Text(json.into())).await.is_err() {
                                             tracing::debug!("ws client disconnected during packet detail send");
                                             break;
                                         }
@@ -520,7 +591,7 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
                                         server_ts,
                                     };
                                     if let Ok(json) = serde_json::to_string(&response)
-                                        && socket.send(Message::Text(json.into())).await.is_err() {
+                                        && send_ws(&mut socket, Message::Text(json.into())).await.is_err() {
                                             tracing::debug!("ws client disconnected during perf pong send");
                                             break;
                                         }
@@ -532,14 +603,14 @@ async fn handle_ws(mut socket: WebSocket, state: Arc<AppState>) {
                                     message: "invalid request".into(),
                                 };
                                 if let Ok(json) = serde_json::to_string(&response)
-                                    && socket.send(Message::Text(json.into())).await.is_err() {
+                                    && send_ws(&mut socket, Message::Text(json.into())).await.is_err() {
                                         tracing::debug!("ws client disconnected during error response send");
                                         break;
                                     }
                             }
                         }
                     }
-                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(_)) | Some(Ok(Message::Close(_))) | None => break,
                     _ => {}
                 }
             }
@@ -635,7 +706,7 @@ mod tests {
         body::Body,
         http::{Request, StatusCode, header},
     };
-    use futures_util::StreamExt;
+    use futures_util::{SinkExt, StreamExt};
     use std::time::Duration;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
     use tower::util::ServiceExt;
@@ -650,6 +721,7 @@ mod tests {
             basic_auth: auth,
             origin_policy: crate::web::origin::DashboardPolicy::new("127.0.0.1", 8080, false, &[])
                 .unwrap(),
+            ws_clients: Arc::new(Semaphore::new(MAX_WS_CLIENTS)),
         })
     }
 
@@ -962,6 +1034,123 @@ mod tests {
         assert!(should_send_resync(Some(11), Some(10)));
         assert!(!should_send_resync(Some(10), Some(10)));
         assert!(should_send_resync(None, Some(10)));
+    }
+
+    #[test]
+    fn websocket_request_budget_expires_and_rearms() {
+        let now = Instant::now();
+        let mut budget = RequestBudget::new(now);
+        for _ in 0..MAX_WS_REQUESTS_PER_SECOND {
+            assert!(budget.admit(now));
+        }
+        assert!(!budget.admit(now + Duration::from_millis(999)));
+        assert!(budget.admit(now + Duration::from_secs(1)));
+    }
+
+    #[tokio::test]
+    async fn websocket_connection_limit_releases_slots_after_disconnect() {
+        let state = test_state(None);
+        let (addr, server_handle) = spawn_ws_server(state.clone()).await;
+        let url = format!("ws://{addr}/ws");
+        let mut sockets = Vec::new();
+        for _ in 0..MAX_WS_CLIENTS {
+            let (mut socket, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+            socket.next().await.unwrap().unwrap(); // hello confirms upgrade completion
+            sockets.push(socket);
+        }
+        match tokio_tungstenite::connect_async(&url).await {
+            Err(tokio_tungstenite::tungstenite::Error::Http(response)) => {
+                assert_eq!(response.status().as_u16(), 503);
+            }
+            _ => panic!("websocket connection limit was not enforced"),
+        }
+        let mut socket = sockets.pop().unwrap();
+        socket.close(None).await.unwrap();
+        drop(socket);
+        let permit = tokio::time::timeout(Duration::from_secs(2), state.ws_clients.acquire())
+            .await
+            .unwrap()
+            .unwrap();
+        drop(permit);
+        let (mut socket, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn oversized_and_fragmented_websocket_requests_disconnect() {
+        use tokio_tungstenite::tungstenite::protocol::frame::{
+            Frame,
+            coding::{Data, OpCode},
+        };
+        let state = test_state(None);
+        let (addr, server_handle) = spawn_ws_server(state.clone()).await;
+        let url = format!("ws://{addr}/ws");
+        for fragmented in [false, true] {
+            let (mut socket, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+            socket.next().await.unwrap().unwrap();
+            if fragmented {
+                let half = MAX_WS_REQUEST_BYTES / 2;
+                socket
+                    .send(WsMessage::Frame(Frame::message(
+                        vec![b' '; half],
+                        OpCode::Data(Data::Text),
+                        false,
+                    )))
+                    .await
+                    .unwrap();
+                socket
+                    .send(WsMessage::Frame(Frame::message(
+                        vec![b' '; half + 1],
+                        OpCode::Data(Data::Continue),
+                        true,
+                    )))
+                    .await
+                    .unwrap();
+            } else {
+                socket
+                    .send(WsMessage::Text(" ".repeat(MAX_WS_REQUEST_BYTES + 1)))
+                    .await
+                    .unwrap();
+            }
+            let response = tokio::time::timeout(Duration::from_secs(2), socket.next())
+                .await
+                .unwrap();
+            assert!(matches!(
+                response,
+                None | Some(Err(_)) | Some(Ok(WsMessage::Close(_)))
+            ));
+        }
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn ingest_bounds_samples_when_ticks_are_missing() {
+        let state = test_state(None);
+        let (tx, rx) = mpsc::channel(64);
+        let task = tokio::spawn(ingest_task(rx, state.clone()));
+        for id in 0..=MAX_PENDING_PACKETS {
+            tx.send(CaptureEvent::Packet(PacketSample {
+                id: id as u64,
+                ts: 0.0,
+                len: 0,
+                protocol: String::new(),
+                src: String::new(),
+                dst: String::new(),
+                info: String::new(),
+            }))
+            .await
+            .unwrap();
+        }
+        tx.send(CaptureEvent::Tick(test_tick(1))).await.unwrap();
+        drop(tx);
+        task.await.unwrap();
+        let frame = state.latest_frame.read().await;
+        let json: serde_json::Value = serde_json::from_str(&frame.as_ref().unwrap().json).unwrap();
+        assert_eq!(
+            json["packets"].as_array().unwrap().len(),
+            MAX_PENDING_PACKETS
+        );
     }
 
     #[tokio::test]

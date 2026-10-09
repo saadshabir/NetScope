@@ -66,7 +66,7 @@ cooldown_secs = 30.0
 # Additional trusted endpoints for remote access; include scheme and port.
 allowed_origins = []
 enabled = false
-bind = "127.0.0.1"
+bind = "127.0.0.1"  # non-loopback binds require both TLS and authentication
 port = 8080
 tick_ms = 1000
 top_n = 10
