@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from argparse import Namespace
 from pathlib import Path
+from unittest.mock import patch
 
-from live_capture import classify_run, pcap_records_and_tcp_sequences, write_report
+from live_capture import check_linux_environment, classify_run, pcap_records_and_tcp_sequences, write_report
+from run_offline import time_adapter
 from workloads import generate_workload
 
 
@@ -39,6 +42,41 @@ def complete_record(rate: float, *, captured: int = 100) -> dict:
             "duplicate_sequence_ids": 0,
         },
     }
+
+
+class LinuxEnvironmentTests(unittest.TestCase):
+    def test_both_runners_accept_ubuntu_gnu_time_version(self) -> None:
+        states = {
+            "tx": {"available": True, "flags": ["UP"], "kind": "veth", "ifindex": 1, "iflink": 2, "address": "02:00:00:00:00:02"},
+            "rx": {"available": True, "flags": ["UP"], "kind": "veth", "ifindex": 2, "iflink": 1, "address": "02:00:00:00:00:01"},
+        }
+        for version in ("GNU time 1.9", "time (GNU Time) UNKNOWN"):
+            with self.subTest(version=version), \
+                 patch("run_offline.sys.platform", "linux"), \
+                 patch("run_offline.Path.is_file", return_value=True), \
+                 patch("run_offline.command_output", return_value=version):
+                self.assertEqual(time_adapter(), (["/usr/bin/time", "-v", "-o"], "linux-gnu-time-v"))
+            with self.subTest(version=version), \
+                 patch("live_capture.platform.system", return_value="Linux"), \
+                 patch("live_capture.shutil.which", side_effect=lambda name: name), \
+                 patch("live_capture.Path.is_file", return_value=True), \
+                 patch("live_capture.command_output", return_value=version), \
+                 patch("live_capture.os.geteuid", return_value=0), \
+                 patch("live_capture.interface_stats", side_effect=lambda name: states[name]):
+                self.assertEqual(check_linux_environment(Namespace(tx_interface="tx", capture_interface="rx")), [])
+
+    def test_linux_timer_rejects_non_gnu_time(self) -> None:
+        with patch("run_offline.sys.platform", "linux"), \
+             patch("run_offline.Path.is_file", return_value=True), \
+             patch("run_offline.command_output", return_value="BSD time"):
+            with self.assertRaisesRegex(RuntimeError, "no supported"):
+                time_adapter()
+        with patch("live_capture.platform.system", return_value="Linux"), \
+             patch("live_capture.shutil.which", side_effect=lambda name: name), \
+             patch("live_capture.Path.is_file", return_value=True), \
+             patch("live_capture.command_output", return_value="BSD time"):
+            with self.assertRaisesRegex(RuntimeError, "GNU /usr/bin/time"):
+                check_linux_environment(Namespace(tx_interface="tx", capture_interface="rx"))
 
 
 class LiveCaptureDecisionTests(unittest.TestCase):

@@ -146,7 +146,7 @@ def check_linux_environment(args: argparse.Namespace) -> list[str]:
     missing = [name for name in ("ip", "tcpreplay") if shutil.which(name) is None]
     if missing:
         raise RuntimeError("missing required command(s): " + ", ".join(missing))
-    if not Path("/usr/bin/time").is_file() or "GNU time" not in (command_output(["/usr/bin/time", "--version"]) or ""):
+    if not Path("/usr/bin/time").is_file() or "gnu time" not in (command_output(["/usr/bin/time", "--version"]) or "").lower():
         raise RuntimeError("GNU /usr/bin/time is required for process CPU and peak RSS measurements")
     if os.geteuid() != 0:
         if shutil.which("sudo") is None or subprocess.run(["sudo", "-n", "true"], check=False).returncode != 0:
