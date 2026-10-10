@@ -331,12 +331,19 @@ impl WebConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
+        #[cfg(not(feature = "dashboard"))]
+        if self.enabled {
+            return Err(
+                "dashboard support is unavailable; rebuild with the dashboard feature".into(),
+            );
+        }
         let host = self.bind.trim_start_matches('[').trim_end_matches(']');
         let loopback = host.eq_ignore_ascii_case("localhost")
             || host
                 .parse::<std::net::IpAddr>()
                 .is_ok_and(|ip| ip.is_loopback());
         Self::validate_remote_access(loopback, self.tls.enabled, self.auth.enabled)?;
+        #[cfg(feature = "dashboard")]
         crate::web::origin::validate(
             &self.bind,
             self.port,

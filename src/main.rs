@@ -2,8 +2,10 @@ mod cli;
 mod output_paths;
 
 use netscope::run_summary::{self, RunAccounting, RunSummary};
-use netscope::{analysis, capture, config, display, flow, metrics, pipeline, protocol, web};
-use netscope::{build_packet_data, maybe_analyze_anomaly, sinks};
+use netscope::{analysis, capture, config, display, flow, metrics, pipeline, protocol};
+#[cfg(feature = "dashboard")]
+use netscope::{build_packet_data, web};
+use netscope::{maybe_analyze_anomaly, sinks};
 
 use clap::Parser;
 use std::collections::VecDeque;
@@ -213,6 +215,7 @@ fn run_capture(
         None => None,
     };
     // Start web dashboard if enabled.
+    #[cfg(feature = "dashboard")]
     let web_handle = start_web_dashboard(config)?;
 
     print_capture_intro(config, capture_mode)?;
@@ -226,6 +229,7 @@ fn run_capture(
             link_type,
             &mut cap,
             savefile.as_mut(),
+            #[cfg(feature = "dashboard")]
             web_handle.as_ref(),
             &mut accounting,
         )
@@ -236,6 +240,7 @@ fn run_capture(
             link_type,
             &mut cap,
             savefile.as_mut(),
+            #[cfg(feature = "dashboard")]
             web_handle.as_ref(),
             &mut accounting,
         )
@@ -406,6 +411,7 @@ fn open_capture_source(
     }
 }
 
+#[cfg(feature = "dashboard")]
 fn start_web_dashboard(
     config: &RuntimeConfig,
 ) -> Result<Option<web::server::WebHandle>, Box<dyn std::error::Error>> {
@@ -881,7 +887,9 @@ struct InlineKernelStats {
     if_dropped_total: u64,
     dropped_interval_stats: u64,
     if_dropped_interval_stats: u64,
+    #[cfg(feature = "dashboard")]
     dropped_interval_web: u64,
+    #[cfg(feature = "dashboard")]
     if_dropped_interval_web: u64,
     initialized: bool,
 }
@@ -892,6 +900,7 @@ struct PcapDropSnapshot {
     if_dropped_total: u64,
 }
 
+#[cfg(feature = "dashboard")]
 #[derive(Debug, Clone, Copy, Default)]
 struct PcapDropDelta {
     dropped: u64,
@@ -916,10 +925,13 @@ impl InlineKernelStats {
         self.if_dropped_interval_stats = self
             .if_dropped_interval_stats
             .saturating_add(if_dropped_delta);
-        self.dropped_interval_web = self.dropped_interval_web.saturating_add(dropped_delta);
-        self.if_dropped_interval_web = self
-            .if_dropped_interval_web
-            .saturating_add(if_dropped_delta);
+        #[cfg(feature = "dashboard")]
+        {
+            self.dropped_interval_web = self.dropped_interval_web.saturating_add(dropped_delta);
+            self.if_dropped_interval_web = self
+                .if_dropped_interval_web
+                .saturating_add(if_dropped_delta);
+        }
         self.initialized = true;
     }
 
@@ -931,6 +943,7 @@ impl InlineKernelStats {
         (dropped, if_dropped)
     }
 
+    #[cfg(feature = "dashboard")]
     fn take_web_interval(&mut self) -> (u64, u64) {
         let dropped = self.dropped_interval_web;
         let if_dropped = self.if_dropped_interval_web;
@@ -1008,7 +1021,7 @@ fn run_capture_inline(
     link_type: protocol::LinkType,
     cap: &mut CaptureSource,
     mut savefile: Option<&mut RotatingSavefile>,
-    web_handle: Option<&web::server::WebHandle>,
+    #[cfg(feature = "dashboard")] web_handle: Option<&web::server::WebHandle>,
     accounting: &mut RunAccounting,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!();
@@ -1048,9 +1061,13 @@ fn run_capture_inline(
     };
 
     // Web dashboard tick state
+    #[cfg(feature = "dashboard")]
     let mut web_tick_last = Instant::now();
+    #[cfg(feature = "dashboard")]
     let mut web_tick_bytes: u64 = 0;
+    #[cfg(feature = "dashboard")]
     let mut web_tick_packets: u64 = 0;
+    #[cfg(feature = "dashboard")]
     let mut web_frame_seq: u64 = 0;
 
     emit_capture_ready(config, None);
@@ -1140,6 +1157,7 @@ fn run_capture_inline(
                                 }
                                 println!("[alert] {}", alert.description);
                                 // Forward alerts to web dashboard
+                                #[cfg(feature = "dashboard")]
                                 if let Some(handle) = web_handle
                                     && handle
                                         .event_tx
@@ -1170,6 +1188,7 @@ fn run_capture_inline(
                         sync_flow_accounting(accounting, &flow_tracker);
 
                         // Send packet samples to web dashboard.
+                        #[cfg(feature = "dashboard")]
                         if let Some(handle) = web_handle
                             && config.web.sample_rate > 0
                             && packet_count.is_multiple_of(config.web.sample_rate)
@@ -1222,8 +1241,11 @@ fn run_capture_inline(
 
                 stats_bytes += wire_len;
                 stats_packets += 1;
-                web_tick_bytes += wire_len;
-                web_tick_packets += 1;
+                #[cfg(feature = "dashboard")]
+                {
+                    web_tick_bytes += wire_len;
+                    web_tick_packets += 1;
+                }
 
                 let watermark = capture_watermark.unwrap_or(timestamp);
                 if (watermark - last_expire_check_ts) >= 1.0 {
@@ -1304,6 +1326,7 @@ fn run_capture_inline(
             }
 
             // Web dashboard tick
+            #[cfg(feature = "dashboard")]
             if let Some(handle) = web_handle {
                 let now = Instant::now();
                 if now.duration_since(web_tick_last).as_millis() as u64 >= config.web.tick_ms {
@@ -1450,7 +1473,7 @@ fn run_capture_pipeline(
     link_type: protocol::LinkType,
     cap: &mut CaptureSource,
     mut savefile: Option<&mut RotatingSavefile>,
-    web_handle: Option<&web::server::WebHandle>,
+    #[cfg(feature = "dashboard")] web_handle: Option<&web::server::WebHandle>,
     accounting: &mut RunAccounting,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // The pool starts with small buffers and grows them for larger frames.
@@ -1491,7 +1514,12 @@ fn run_capture_pipeline(
         link_type,
     };
 
-    let mut pipe = pipeline::spawn(pipeline_cfg, running.clone(), web_handle)?;
+    let mut pipe = pipeline::spawn(
+        pipeline_cfg,
+        running.clone(),
+        #[cfg(feature = "dashboard")]
+        web_handle,
+    )?;
     let num_workers = pipe.num_workers();
     accounting.worker_count = Some(num_workers);
     accounting.dispatched_frames = Some(0);

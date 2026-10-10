@@ -13,6 +13,8 @@ cargo build --locked --release
 
 The checked-in trace contains eight synthetic packets across one TCP/TLS and one UDP/DNS flow. It is small, deterministic, and requires no capture privileges. See [all PCAP investigations](examples/README.md) for expected fields and parser-edge cases.
 
+The `dashboard` Cargo feature is enabled by default. For a headless CLI without the HTTP, WebSocket, embedded-assets, authentication, or TLS dependencies, build with `cargo build --locked --release --no-default-features`. This build supports capture, flow analysis, and exports; requesting `--web` or `web.enabled = true` fails before capture or output files are opened.
+
 Live capture requires permission to read the interface, usually `sudo` or Linux `CAP_NET_RAW`. The dashboard binds to `127.0.0.1` by default. See [Quickstart](docs/quickstart.md) for setup, live capture, and troubleshooting.
 
 ## Documentation

@@ -2,14 +2,18 @@
 //! statistics, and forwards results to the CLI and web dashboard.
 
 use crossbeam_channel::Receiver;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(feature = "dashboard")]
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+#[cfg(feature = "dashboard")]
 use tokio::sync::mpsc;
 
 use crate::flow::{FlowDelta, FlowSnapshot};
 use crate::metrics;
 use crate::sinks::OutputSinks;
+#[cfg(feature = "dashboard")]
 use crate::web::messages::{CaptureEvent, FlowInfo, StatsTick};
 
 use super::worker::{ShardShutdown, ShardTick, WorkerEvent, WorkerRunStats};
@@ -156,8 +160,10 @@ impl AggregatorHandle {
 /// Run the aggregator loop. This blocks until all worker senders disconnect.
 pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: AggregatorRunConfig) {
     let AggregatorRunConfig {
+        #[cfg(feature = "dashboard")]
         web_event_tx,
         max_top_n,
+        #[cfg(feature = "dashboard")]
         web_top_n,
         stats,
         kernel_stats,
@@ -171,6 +177,7 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
         .lock()
         .map(|g| g.num_workers)
         .unwrap_or_else(|e| e.into_inner().num_workers);
+    #[cfg(feature = "dashboard")]
     let frame_seq = AtomicU64::new(0);
 
     // Accumulate partial shard ticks, then merge once all shards have reported.
@@ -208,9 +215,11 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
                         );
 
                         // Forward to web dashboard.
+                        #[cfg(feature = "dashboard")]
                         if let Some(tx) = &web_event_tx {
                             let stats_tick = aggregated_to_stats_tick(
                                 &merged,
+                                #[cfg(feature = "dashboard")]
                                 web_top_n,
                                 frame_seq.fetch_add(1, Ordering::Relaxed),
                             );
@@ -230,6 +239,7 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
                     if let Err(err) = handle_event(
                         event,
                         &handle,
+                        #[cfg(feature = "dashboard")]
                         &web_event_tx,
                         &mut output_sinks,
                         DrainMode::Full,
@@ -238,6 +248,7 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
                         let _ = drain_channel(
                             &rx,
                             &handle,
+                            #[cfg(feature = "dashboard")]
                             &web_event_tx,
                             &mut output_sinks,
                             DrainMode::ShutdownOnly,
@@ -263,9 +274,11 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
                         merged.kernel_if_drops,
                     );
 
+                    #[cfg(feature = "dashboard")]
                     if let Some(tx) = &web_event_tx {
                         let stats_tick = aggregated_to_stats_tick(
                             &merged,
+                            #[cfg(feature = "dashboard")]
                             web_top_n,
                             frame_seq.fetch_add(1, Ordering::Relaxed),
                         );
@@ -287,6 +300,7 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
                 if let Err(err) = drain_channel(
                     &rx,
                     &handle,
+                    #[cfg(feature = "dashboard")]
                     &web_event_tx,
                     &mut output_sinks,
                     DrainMode::Full,
@@ -311,9 +325,11 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
             merged.kernel_drops,
             merged.kernel_if_drops,
         );
+        #[cfg(feature = "dashboard")]
         if let Some(tx) = &web_event_tx {
             let tick = aggregated_to_stats_tick(
                 &merged,
+                #[cfg(feature = "dashboard")]
                 web_top_n,
                 frame_seq.fetch_add(1, Ordering::Relaxed),
             );
@@ -331,8 +347,10 @@ pub fn run(rx: Receiver<WorkerEvent>, handle: AggregatorHandle, config: Aggregat
 }
 
 pub struct AggregatorRunConfig {
+    #[cfg(feature = "dashboard")]
     pub web_event_tx: Option<mpsc::Sender<CaptureEvent>>,
     pub max_top_n: usize,
+    #[cfg(feature = "dashboard")]
     pub web_top_n: usize,
     pub stats: Arc<PipelineStats>,
     pub kernel_stats: Arc<KernelPcapStats>,
@@ -358,7 +376,7 @@ impl Clone for DrainMode {
 fn handle_event(
     event: WorkerEvent,
     handle: &AggregatorHandle,
-    web_event_tx: &Option<mpsc::Sender<CaptureEvent>>,
+    #[cfg(feature = "dashboard")] web_event_tx: &Option<mpsc::Sender<CaptureEvent>>,
     output_sinks: &mut OutputSinks,
     mode: DrainMode,
 ) -> Result<(), std::io::Error> {
@@ -376,11 +394,13 @@ fn handle_event(
         WorkerEvent::ExpiredFlows(events) => {
             output_sinks.write_expired_flows(&events)?;
         }
+        #[cfg(feature = "dashboard")]
         WorkerEvent::Packet(sample) => {
             if let Some(tx) = web_event_tx {
                 let _ = tx.try_send(CaptureEvent::Packet(sample));
             }
         }
+        #[cfg(feature = "dashboard")]
         WorkerEvent::PacketStored(stored) => {
             if let Some(tx) = web_event_tx {
                 let _ = tx.try_send(CaptureEvent::PacketStored(stored));
@@ -398,12 +418,19 @@ fn handle_event(
 fn drain_channel(
     rx: &Receiver<WorkerEvent>,
     handle: &AggregatorHandle,
-    web_event_tx: &Option<mpsc::Sender<CaptureEvent>>,
+    #[cfg(feature = "dashboard")] web_event_tx: &Option<mpsc::Sender<CaptureEvent>>,
     output_sinks: &mut OutputSinks,
     mode: DrainMode,
 ) -> Result<(), std::io::Error> {
     while let Ok(event) = rx.try_recv() {
-        handle_event(event, handle, web_event_tx, output_sinks, mode.clone())?;
+        handle_event(
+            event,
+            handle,
+            #[cfg(feature = "dashboard")]
+            web_event_tx,
+            output_sinks,
+            mode.clone(),
+        )?;
     }
 
     Ok(())
@@ -570,6 +597,7 @@ fn merge_ticks(
     }
 }
 
+#[cfg(feature = "dashboard")]
 fn aggregated_to_stats_tick(agg: &AggregatedTick, web_top_n: usize, frame_seq: u64) -> StatsTick {
     let elapsed_secs = (agg.interval_ms as f64 / 1000.0).max(0.001);
 
@@ -600,6 +628,7 @@ fn aggregated_to_stats_tick(agg: &AggregatedTick, web_top_n: usize, frame_seq: u
     }
 }
 
+#[cfg(feature = "dashboard")]
 fn unix_ms_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -666,8 +695,10 @@ mod tests {
             rx,
             handle.clone(),
             AggregatorRunConfig {
+                #[cfg(feature = "dashboard")]
                 web_event_tx: None,
                 max_top_n: 0,
+                #[cfg(feature = "dashboard")]
                 web_top_n: 0,
                 stats: Arc::new(PipelineStats::new()),
                 kernel_stats: Arc::new(KernelPcapStats::new()),
@@ -743,8 +774,10 @@ mod tests {
 
         let join = std::thread::spawn(move || {
             let config = AggregatorRunConfig {
+                #[cfg(feature = "dashboard")]
                 web_event_tx: None,
                 max_top_n: 0,
+                #[cfg(feature = "dashboard")]
                 web_top_n: 0,
                 stats,
                 kernel_stats,
@@ -789,8 +822,10 @@ mod tests {
 
         let join = std::thread::spawn(move || {
             let config = AggregatorRunConfig {
+                #[cfg(feature = "dashboard")]
                 web_event_tx: None,
                 max_top_n: 0,
+                #[cfg(feature = "dashboard")]
                 web_top_n: 0,
                 stats,
                 kernel_stats,
