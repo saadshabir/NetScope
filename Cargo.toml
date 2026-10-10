@@ -47,7 +47,7 @@ num_cpus = "1"
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }
 tokio = { version = "1", features = ["full"] }
-rust-embed = { version = "8", features = ["mime-guess"] }
+rust-embed = "8"
 mime_guess = "2"
 base64 = "0.22"
 
