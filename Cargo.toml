@@ -40,9 +40,6 @@ ahash = "0.8"
 # Lock-free channels for sharded pipeline
 crossbeam-channel = "0.5"
 
-# CPU topology
-num_cpus = "1"
-
 # Web dashboard
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }

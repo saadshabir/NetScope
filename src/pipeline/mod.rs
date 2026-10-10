@@ -398,7 +398,8 @@ fn resolve_num_workers_for_flow_budget(configured: usize, max_flows: usize) -> u
 
 pub fn resolve_num_workers(configured: usize) -> usize {
     if configured == 0 {
-        (num_cpus::get() / 2).clamp(1, 8)
+        let cpus = std::thread::available_parallelism().map_or(1, usize::from);
+        (cpus / 2).clamp(1, 8)
     } else {
         configured.max(1)
     }
