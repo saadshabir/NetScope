@@ -49,7 +49,7 @@ Worker batching at 32 and 64 packets was rejected because CPU changes were incon
 
 Default/headless export and accounting checks covered 80 combinations of storage mode, worker count, retention, and export settings. For bounded pipeline runs, random flow-to-worker hashing can change which flows survive each worker's quota across processes; those cases compare accounting, retention bounds, and lifecycle reconciliation rather than requiring identical retained flow IDs. These observations are offline measurements and do not establish Linux live-capture loss bounds. Local raw measurements and exact source snapshots are retained under ignored `tmp/perf/optimization-*`, `tmp/perf/inline-clock-5m`, and the focused comparison directories.
 
-Final local validation passed formatting, locked offline Clippy with warnings denied, 193 default-build Rust tests, 170 headless Rust tests, both release builds, all four synthetic fixtures, and seven Python benchmark/live-classification tests. Linux-only live shutdown tests were not run on macOS.
+Final local validation passed formatting, locked offline Clippy with warnings denied, 193 default-build Rust tests, 170 headless Rust tests, both release builds, all four synthetic fixtures, and seven Python benchmark/live-classification tests. A final clean-source offline/dashboard suite passed all 72 runs across 12 scenarios, including local WebSocket delivery; its raw results are in `tmp/perf/optimization-final/offline`. Linux-only live shutdown tests were not run on macOS.
 
 ### 2026-10-08 optimization pass
 
