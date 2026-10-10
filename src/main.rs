@@ -1288,8 +1288,8 @@ fn run_capture_inline(
             }
 
             // Stats printing
-            let now = Instant::now();
             if config.stats.enabled
+                && let now = Instant::now()
                 && now.duration_since(stats_last).as_millis() as u64 >= config.stats.interval_ms
             {
                 let elapsed = now.duration_since(stats_last).as_secs_f64().max(0.001);
