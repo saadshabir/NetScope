@@ -102,6 +102,41 @@ mod tests {
     }
 
     #[test]
+    fn exact_top_reports_keep_cli_and_dashboard_deltas_independent() {
+        for deep in [false, true] {
+            let mut tracker = FlowTracker::new(0.0, 100, deep, deep, deep);
+            for port in 1..=20 {
+                let frame = clock_test_frame(port % 2 == 0, port, false);
+                let packet = parse_packet_with_linktype(&frame, LinkType::Ethernet).unwrap();
+                tracker.observe(1.0, port as u64 * 100, &packet);
+            }
+            assert!(tracker.top_flows_by_delta(0).is_empty());
+            assert!(tracker.top_flows_with_snapshot(0).is_empty());
+            let cli = tracker.top_flows_by_delta(3);
+            let web = tracker.top_flows_with_snapshot(3);
+            assert_eq!(
+                cli.iter().map(|flow| flow.delta_bytes).collect::<Vec<_>>(),
+                [2000, 1900, 1800]
+            );
+            assert_eq!(
+                web.iter()
+                    .map(|(flow, _)| flow.delta_bytes)
+                    .collect::<Vec<_>>(),
+                [2000, 1900, 1800]
+            );
+            for (flow, snapshot) in &web {
+                assert_eq!(flow.delta_bytes, snapshot.bytes_total);
+            }
+            assert_eq!(tracker.top_flows_by_delta(1)[0].delta_bytes, 1700);
+            assert_eq!(tracker.top_flows_with_snapshot(1)[0].0.delta_bytes, 1700);
+            assert_eq!(tracker.top_flows_by_delta(usize::MAX).len(), 16);
+            assert_eq!(tracker.top_flows_with_snapshot(usize::MAX).len(), 16);
+            assert!(tracker.top_flows_by_delta(1).is_empty());
+            assert!(tracker.top_flows_with_snapshot(1).is_empty());
+        }
+    }
+
+    #[test]
     fn clock_eviction_preserves_reobserved_flows_and_recovers_after_expiry() {
         for deep in [false, true] {
             for ipv6 in [false, true] {
