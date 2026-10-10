@@ -61,7 +61,7 @@ impl FlowTracker {
         track_out_of_order: bool,
     ) -> Self {
         // Pre-size the map to avoid rehash churn on the hot path.
-        // Add 25% headroom so inserts near `max_flows` don't trigger a resize.
+        // Add 25% headroom so inserts near `max_flows` do not trigger a resize.
         let initial_capacity = if max_flows > 0 {
             max_flows + max_flows / 4
         } else {
@@ -71,7 +71,7 @@ impl FlowTracker {
         let store = if scale_mode {
             FlowStore::Scale {
                 flows_v4: AHashMap::with_capacity(initial_capacity),
-                flows_v6: AHashMap::with_capacity(initial_capacity / 8),
+                flows_v6: AHashMap::new(),
             }
         } else {
             FlowStore::Full(AHashMap::with_capacity(initial_capacity))
@@ -287,6 +287,11 @@ impl FlowTracker {
                     entry.observe(ts, direction, wire_len, flags);
                 }
                 CompactFlowKey::V6(key) => {
+                    // Defer the configured reservation until IPv6 is observed,
+                    // retaining the same growth policy for IPv6 bursts.
+                    if flows_v6.capacity() == 0 && self.max_flows > 0 {
+                        flows_v6.reserve((self.max_flows + self.max_flows / 4) / 8);
+                    }
                     let entry = flows_v6.entry(key).or_insert_with(|| {
                         is_new = true;
                         ScaleFlowEntry::new(ts, protocol)
