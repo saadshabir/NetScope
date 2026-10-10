@@ -1,6 +1,7 @@
 use ahash::{AHashMap, AHashSet};
 use std::cmp::Ordering;
-use std::collections::VecDeque;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, VecDeque};
 #[cfg(test)]
 use std::net::IpAddr;
 
@@ -12,6 +13,51 @@ use super::{
     CompactFlowKey, ExpiredFlowEvent, ExpiredFlowReason, FlowDelta, FlowEntry, FlowKey, FlowKeyV4,
     FlowKeyV6, FlowProtocol, FlowSnapshot, ScaleFlowEntry, TcpFlags, tcp_sequence_len,
 };
+
+// Keep only exact top-N candidates while scanning the retained table.
+// Equal-byte ties remain unspecified, as with the previous unstable selection.
+struct TopCandidate<K> {
+    key: K,
+    bytes: u64,
+}
+impl<K> PartialEq for TopCandidate<K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+    }
+}
+impl<K> Eq for TopCandidate<K> {}
+impl<K> PartialOrd for TopCandidate<K> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl<K> Ord for TopCandidate<K> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.bytes.cmp(&other.bytes)
+    }
+}
+fn exact_top<K>(entries: impl Iterator<Item = (K, u64)>, n: usize) -> Vec<(K, u64)> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut heap = BinaryHeap::new();
+    for (key, bytes) in entries {
+        if bytes == 0 {
+            continue;
+        }
+        if heap.len() < n {
+            heap.push(Reverse(TopCandidate { key, bytes }));
+        } else if let Some(mut smallest) = heap.peek_mut()
+            && bytes > smallest.0.bytes
+        {
+            *smallest = Reverse(TopCandidate { key, bytes });
+        }
+    }
+    heap.into_sorted_vec()
+        .into_iter()
+        .map(|Reverse(entry)| (entry.key, entry.bytes))
+        .collect()
+}
 
 #[derive(Debug)]
 enum FlowStore {
@@ -61,7 +107,7 @@ impl FlowTracker {
         track_out_of_order: bool,
     ) -> Self {
         // Pre-size the map to avoid rehash churn on the hot path.
-        // Add 25% headroom so inserts near `max_flows` don't trigger a resize.
+        // Add 25% headroom so inserts near `max_flows` do not trigger a resize.
         let initial_capacity = if max_flows > 0 {
             max_flows + max_flows / 4
         } else {
@@ -71,7 +117,7 @@ impl FlowTracker {
         let store = if scale_mode {
             FlowStore::Scale {
                 flows_v4: AHashMap::with_capacity(initial_capacity),
-                flows_v6: AHashMap::with_capacity(initial_capacity / 8),
+                flows_v6: AHashMap::new(),
             }
         } else {
             FlowStore::Full(AHashMap::with_capacity(initial_capacity))
@@ -287,6 +333,11 @@ impl FlowTracker {
                     entry.observe(ts, direction, wire_len, flags);
                 }
                 CompactFlowKey::V6(key) => {
+                    // Defer the configured reservation until IPv6 is observed,
+                    // retaining the same growth policy for IPv6 bursts.
+                    if flows_v6.capacity() == 0 && self.max_flows > 0 {
+                        flows_v6.reserve((self.max_flows + self.max_flows / 4) / 8);
+                    }
                     let entry = flows_v6.entry(key).or_insert_with(|| {
                         is_new = true;
                         ScaleFlowEntry::new(ts, protocol)
@@ -595,30 +646,23 @@ impl FlowTracker {
         }
         match &mut self.store {
             FlowStore::Full(flows) => {
-                let mut deltas: Vec<FlowDelta> = flows
-                    .iter()
-                    .filter_map(|(key, entry)| {
-                        let total = entry.total_bytes();
-                        let delta = total.saturating_sub(entry.last_report_bytes_stats);
-                        if delta > 0 {
-                            Some(FlowDelta {
-                                key: key.clone(),
-                                delta_bytes: delta,
-                            })
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                let top_n = n.min(deltas.len());
-                if top_n > 0 && top_n < deltas.len() {
-                    deltas.select_nth_unstable_by(top_n - 1, |a, b| {
-                        b.delta_bytes.cmp(&a.delta_bytes)
-                    });
-                    deltas.truncate(top_n);
-                }
-                deltas.sort_unstable_by(|a, b| b.delta_bytes.cmp(&a.delta_bytes));
+                let deltas: Vec<FlowDelta> = exact_top(
+                    flows.iter().map(|(key, entry)| {
+                        (
+                            key,
+                            entry
+                                .total_bytes()
+                                .saturating_sub(entry.last_report_bytes_stats),
+                        )
+                    }),
+                    n,
+                )
+                .into_iter()
+                .map(|(key, delta_bytes)| FlowDelta {
+                    key: key.clone(),
+                    delta_bytes,
+                })
+                .collect();
 
                 for d in &deltas {
                     if let Some(entry) = flows.get_mut(&d.key) {
@@ -630,30 +674,16 @@ impl FlowTracker {
             FlowStore::Scale {
                 flows_v4, flows_v6, ..
             } => {
-                let mut deltas: Vec<(CompactFlowKey, u64)> = Vec::new();
-                deltas.extend(flows_v4.iter().filter_map(|(key, entry)| {
-                    let delta = entry.stats_delta();
-                    if delta > 0 {
-                        Some((CompactFlowKey::V4(*key), delta))
-                    } else {
-                        None
-                    }
-                }));
-                deltas.extend(flows_v6.iter().filter_map(|(key, entry)| {
-                    let delta = entry.stats_delta();
-                    if delta > 0 {
-                        Some((CompactFlowKey::V6(*key), delta))
-                    } else {
-                        None
-                    }
-                }));
-
-                let top_n = n.min(deltas.len());
-                if top_n > 0 && top_n < deltas.len() {
-                    deltas.select_nth_unstable_by(top_n - 1, |a, b| b.1.cmp(&a.1));
-                    deltas.truncate(top_n);
-                }
-                deltas.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+                let deltas =
+                    exact_top(
+                        flows_v4
+                            .iter()
+                            .map(|(key, entry)| (CompactFlowKey::V4(*key), entry.stats_delta()))
+                            .chain(flows_v6.iter().map(|(key, entry)| {
+                                (CompactFlowKey::V6(*key), entry.stats_delta())
+                            })),
+                        n,
+                    );
 
                 for (key, _) in &deltas {
                     match key {
@@ -692,30 +722,23 @@ impl FlowTracker {
         }
         match &mut self.store {
             FlowStore::Full(flows) => {
-                let mut deltas: Vec<FlowDelta> = flows
-                    .iter()
-                    .filter_map(|(key, entry)| {
-                        let total = entry.total_bytes();
-                        let delta = total.saturating_sub(entry.last_report_bytes_web);
-                        if delta > 0 {
-                            Some(FlowDelta {
-                                key: key.clone(),
-                                delta_bytes: delta,
-                            })
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                let top_n = n.min(deltas.len());
-                if top_n > 0 && top_n < deltas.len() {
-                    deltas.select_nth_unstable_by(top_n - 1, |a, b| {
-                        b.delta_bytes.cmp(&a.delta_bytes)
-                    });
-                    deltas.truncate(top_n);
-                }
-                deltas.sort_unstable_by(|a, b| b.delta_bytes.cmp(&a.delta_bytes));
+                let deltas: Vec<FlowDelta> = exact_top(
+                    flows.iter().map(|(key, entry)| {
+                        (
+                            key,
+                            entry
+                                .total_bytes()
+                                .saturating_sub(entry.last_report_bytes_web),
+                        )
+                    }),
+                    n,
+                )
+                .into_iter()
+                .map(|(key, delta_bytes)| FlowDelta {
+                    key: key.clone(),
+                    delta_bytes,
+                })
+                .collect();
 
                 let mut result = Vec::with_capacity(deltas.len());
                 for d in deltas {
@@ -728,30 +751,17 @@ impl FlowTracker {
                 result
             }
             FlowStore::Scale { flows_v4, flows_v6 } => {
-                let mut deltas: Vec<(CompactFlowKey, u64)> = Vec::new();
-                deltas.extend(flows_v4.iter().filter_map(|(key, entry)| {
-                    let delta = entry.web_delta();
-                    if delta > 0 {
-                        Some((CompactFlowKey::V4(*key), delta))
-                    } else {
-                        None
-                    }
-                }));
-                deltas.extend(flows_v6.iter().filter_map(|(key, entry)| {
-                    let delta = entry.web_delta();
-                    if delta > 0 {
-                        Some((CompactFlowKey::V6(*key), delta))
-                    } else {
-                        None
-                    }
-                }));
-
-                let top_n = n.min(deltas.len());
-                if top_n > 0 && top_n < deltas.len() {
-                    deltas.select_nth_unstable_by(top_n - 1, |a, b| b.1.cmp(&a.1));
-                    deltas.truncate(top_n);
-                }
-                deltas.sort_unstable_by(|a, b| b.1.cmp(&a.1));
+                let deltas = exact_top(
+                    flows_v4
+                        .iter()
+                        .map(|(key, entry)| (CompactFlowKey::V4(*key), entry.web_delta()))
+                        .chain(
+                            flows_v6
+                                .iter()
+                                .map(|(key, entry)| (CompactFlowKey::V6(*key), entry.web_delta())),
+                        ),
+                    n,
+                );
 
                 let mut result = Vec::with_capacity(deltas.len());
                 for (compact_key, delta_bytes) in deltas {

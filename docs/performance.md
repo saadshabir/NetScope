@@ -1,6 +1,6 @@
 # Performance
 
-This page documents NetScope's offline benchmark system and summarizes historical optimization measurements. Raw benchmark artifacts are no longer retained in this checkout. Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
+This page documents NetScope's offline benchmark system and summarizes optimization measurements. Raw benchmark artifacts are excluded from version control; the older published bundles were removed. Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
 
 - [Historical results](#results)
 - [Recreating workloads](#recreating-workloads)
@@ -9,6 +9,47 @@ This page documents NetScope's offline benchmark system and summarizes historica
 - [Tuning](#tuning)
 
 ## Results
+
+### 2026-10-10 build and reporting pass
+
+The [optimization plan](optimization-plan.md) ships a first phase: narrower dependency features, an optional dashboard enabled by default, fewer inline clock reads when stats are disabled, deferred scale-mode IPv6 reservation, and bounded exact top-N reporting. The headless command is `cargo build --locked --release --no-default-features`. A headless dashboard request fails before capture or output files are opened.
+
+On the same Apple M4/macOS host, the fresh audit baseline was commit `0ffcb38`. Build-footprint measurements below use `5e478c4`, after the feature boundary and test isolation fix, before the packet-loop/reporting changes. Counts are unique resolved normal packages including NetScope on this platform, not the lockfile count or development dependencies.
+
+| Build | Release bytes | MiB | Normal packages |
+| --- | ---: | ---: | ---: |
+| Audit baseline | 8,624,496 | 8.22 | 150 |
+| Dashboard enabled | 8,601,936 | 8.20 | 141 |
+| Headless | 2,613,472 | 2.49 | 65 |
+
+After the reporting change (`133d735`), final release builds measured 8,488,464 bytes (8.10 MiB) with the dashboard and 2,611,088 bytes (2.49 MiB) headless. Binary sizes are specific to this host and toolchain.
+
+The headless normal graph excludes Tokio, Axum, and Rustls. Separate sequential clean release builds with cached dependencies took 35.41 seconds for the dashboard and 16.59 seconds for headless. These are single build observations; they do not establish a repeatable build-time speedup. The automatic worker policy still uses half the estimated available CPUs, clamped to 1–8. The two CPU APIs agreed on this host; container/affinity behavior has not been exercised on Linux.
+
+For the isolated inline clock change (`4ab995c`), baseline and candidate binaries alternated over five-million-packet traces, with one warm-up and five measured repetitions each. Stats, dashboard, and exports were disabled.
+
+| Inline workload | CPU seconds / million packets before median [range] | After median [range] |
+| --- | ---: | ---: |
+| Steady flow | 0.128 [0.112–0.142] | 0.106 [0.096–0.110] |
+| Mixed | 0.174 [0.172–0.208] | 0.154 [0.154–0.180] |
+| Analysis heavy | 0.192 [0.190–0.202] | 0.192 [0.188–0.200] |
+
+Peak RSS stayed approximately 8.1, 18.3, and 96.9 MiB respectively. Packet accounting reconciled without dispatch drops or worker failures. Throughput ranges were too variable for a general throughput claim; the analysis-heavy case showed essentially unchanged CPU cost.
+
+Exact top-N selection (`133d735`, compared with `b80b2c6`) retains at most N candidates during each table scan and clones only selected full-mode keys. A focused harness populated 100,000 retained flows from the checksummed high-cardinality trace, then timed 1,000 rounds of CLI top-10 and dashboard top-10 snapshot reporting. Both APIs kept independent delta watermarks. Each storage mode used one warm-up and five measured runs with alternating binaries.
+
+| Storage | Reporting seconds before median [range] | After median [range] | Whole-process peak RSS MiB before → after (median) |
+| --- | ---: | ---: | ---: |
+| Scale | 2.076 [2.061–2.229] | 0.523 [0.508–0.825] | 443.22 → 94.69 |
+| Full | 4.927 [4.735–5.862] | 0.656 [0.535–0.959] | 503.12 → 152.84 |
+
+These are repeated reporting costs, not packet replay throughput or isolated flow-storage size. The reporting timer excludes setup; process RSS includes the input buffer, table population, and allocator behavior across repeated reports. The harness, binary/workload hashes, raw readings, and candidate source snapshot are saved locally in `tmp/perf/heap-report-comparison`.
+
+Worker batching at 32 and 64 packets was rejected because CPU changes were inconsistent across workloads and worker counts. Capping initial flow allocation reduced memory for tiny traces but increased one-million-packet burst peak RSS from 35.34 to 55.38 MiB in inline scale mode and 93.44 to 159.03 MiB in inline full mode. The original IPv4 preallocation remains. IPv6 reservation is deferred until first use, then uses the original reservation size; the IPv6 expiry/churn comparison did not establish a CPU improvement.
+
+Default/headless export and accounting checks covered 80 combinations of storage mode, worker count, retention, and export settings. For bounded pipeline runs, random flow-to-worker hashing can change which flows survive each worker's quota across processes; those cases compare accounting, retention bounds, and lifecycle reconciliation rather than requiring identical retained flow IDs. These observations are offline measurements and do not establish Linux live-capture loss bounds. Local raw measurements and exact source snapshots are retained under ignored `tmp/perf/optimization-*`, `tmp/perf/inline-clock-5m`, and the focused comparison directories.
+
+Final local validation passed formatting, locked offline Clippy with warnings denied, 193 default-build Rust tests, 170 headless Rust tests, both release builds, all four synthetic fixtures, and seven Python benchmark/live-classification tests. A final clean-source offline/dashboard suite passed all 72 runs across 12 scenarios, including local WebSocket delivery; its raw results are in `tmp/perf/optimization-final/offline`. Linux-only live shutdown tests were not run on macOS.
 
 ### 2026-10-08 optimization pass
 

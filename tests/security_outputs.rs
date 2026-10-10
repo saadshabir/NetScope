@@ -3,17 +3,23 @@
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> Self {
+        static NEXT_DIR: AtomicU64 = AtomicU64::new(0);
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("netscope-security-{unique}"));
+        let path = std::env::temp_dir().join(format!(
+            "netscope-security-{}-{unique}-{}",
+            std::process::id(),
+            NEXT_DIR.fetch_add(1, Ordering::Relaxed),
+        ));
         std::fs::create_dir(&path).unwrap();
         Self(path)
     }

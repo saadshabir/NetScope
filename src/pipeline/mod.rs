@@ -32,6 +32,7 @@ pub mod worker;
 use crate::config::{AnalysisConfig, FlowConfig, StatsConfig, WebConfig};
 use crate::protocol::LinkType;
 use crate::sinks;
+#[cfg(feature = "dashboard")]
 use crate::web;
 use crossbeam_channel::{Sender, bounded};
 use std::path::PathBuf;
@@ -221,8 +222,15 @@ impl PipelineHandle {
 pub fn spawn(
     config: PipelineConfig,
     running: Arc<AtomicBool>,
-    web_handle: Option<&web::server::WebHandle>,
+    #[cfg(feature = "dashboard")] web_handle: Option<&web::server::WebHandle>,
 ) -> Result<PipelineHandle, std::io::Error> {
+    #[cfg(not(feature = "dashboard"))]
+    if config.web.enabled {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "dashboard support is unavailable; rebuild with the dashboard feature",
+        ));
+    }
     if config.analysis.anomalies.has_enabled_detector() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -311,6 +319,7 @@ pub fn spawn(
     drop(agg_tx);
 
     // Spawn aggregator.
+    #[cfg(feature = "dashboard")]
     let web_event_tx = web_handle.map(|h| h.event_tx.clone());
     let agg_handle = aggregator::AggregatorHandle::new(num_workers);
     let agg_handle_clone = agg_handle.clone();
@@ -339,8 +348,10 @@ pub fn spawn(
             .name("ns-aggregator".into())
             .spawn(move || {
                 let run_cfg = aggregator::AggregatorRunConfig {
+                    #[cfg(feature = "dashboard")]
                     web_event_tx,
                     max_top_n,
+                    #[cfg(feature = "dashboard")]
                     web_top_n,
                     stats: stats_clone,
                     kernel_stats: kernel_stats_clone,
@@ -398,7 +409,8 @@ fn resolve_num_workers_for_flow_budget(configured: usize, max_flows: usize) -> u
 
 pub fn resolve_num_workers(configured: usize) -> usize {
     if configured == 0 {
-        (num_cpus::get() / 2).clamp(1, 8)
+        let cpus = std::thread::available_parallelism().map_or(1, usize::from);
+        (cpus / 2).clamp(1, 8)
     } else {
         configured.max(1)
     }

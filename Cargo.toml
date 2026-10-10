@@ -12,6 +12,10 @@ path = "src/lib.rs"
 name = "netscope"
 path = "src/main.rs"
 
+[features]
+default = ["dashboard"]
+dashboard = ["dep:axum", "dep:axum-server", "dep:tokio", "dep:rust-embed", "dep:mime_guess", "dep:base64"]
+
 [dependencies]
 # Packet capture
 pcap = "2"
@@ -21,7 +25,7 @@ clap = { version = "4", features = ["derive"] }
 
 # Logging / tracing
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = "0.3"
 
 # Serialization (for future flow export)
 serde = { version = "1", features = ["derive"] }
@@ -40,16 +44,13 @@ ahash = "0.8"
 # Lock-free channels for sharded pipeline
 crossbeam-channel = "0.5"
 
-# CPU topology
-num_cpus = "1"
-
 # Web dashboard
-axum = { version = "0.8", features = ["ws"] }
-axum-server = { version = "0.8", features = ["tls-rustls"] }
-tokio = { version = "1", features = ["full"] }
-rust-embed = { version = "8", features = ["mime-guess"] }
-mime_guess = "2"
-base64 = "0.22"
+axum = { version = "0.8", features = ["ws"], optional = true }
+axum-server = { version = "0.8", features = ["tls-rustls"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros"], optional = true }
+rust-embed = { version = "8", optional = true }
+mime_guess = { version = "2", optional = true }
+base64 = { version = "0.22", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -61,7 +62,7 @@ same-file = "1"
 criterion = { version = "0.5", features = ["html_reports"] }
 tower = { version = "0.5", features = ["util"] }
 futures-util = "0.3"
-tokio-tungstenite = "0.23"
+tokio-tungstenite = "0.28"
 
 [[bench]]
 name = "hot_path"

@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use crate::config::{AnalysisConfig, FlowConfig, WebConfig};
 use crate::flow::{ExpiredFlowEvent, FlowDelta, FlowSnapshot, FlowTracker, FlowTrackerStats};
 use crate::protocol;
+#[cfg(feature = "dashboard")]
 use crate::web::messages::{PacketSample, StoredPacket};
 
 use super::top_flows::SpaceSavingTopFlows;
@@ -19,8 +20,10 @@ pub enum WorkerEvent {
     /// Per-tick partial statistics from this shard.
     ShardTick(ShardTick),
     /// A sampled packet summary (for the live packet feed).
+    #[cfg(feature = "dashboard")]
     Packet(PacketSample),
     /// A stored packet for the detail ring buffer.
+    #[cfg(feature = "dashboard")]
     PacketStored(StoredPacket),
     /// Flows expired due to timeout or max-flow eviction.
     ExpiredFlows(Vec<ExpiredFlowEvent>),
@@ -262,6 +265,7 @@ impl Worker {
                 // Use the global packet id (assigned by the capture thread) so
                 // that sample_rate controls the global rate across all shards,
                 // not a per-shard rate that would produce N*sample_rate samples.
+                #[cfg(feature = "dashboard")]
                 if self.web_cfg.enabled
                     && self.web_cfg.sample_rate > 0
                     && pkt.id.is_multiple_of(self.web_cfg.sample_rate)

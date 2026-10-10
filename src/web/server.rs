@@ -1109,7 +1109,7 @@ mod tests {
                     .unwrap();
             } else {
                 socket
-                    .send(WsMessage::Text(" ".repeat(MAX_WS_REQUEST_BYTES + 1)))
+                    .send(WsMessage::Text(" ".repeat(MAX_WS_REQUEST_BYTES + 1).into()))
                     .await
                     .unwrap();
             }
