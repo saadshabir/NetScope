@@ -76,7 +76,7 @@ impl<'a> LinuxSllHeader<'a> {
     }
 }
 
-fn format_addr(bytes: &[u8]) -> String {
+pub(crate) fn format_addr(bytes: &[u8]) -> String {
     bytes
         .iter()
         .map(|b| format!("{:02x}", b))

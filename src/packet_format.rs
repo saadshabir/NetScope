@@ -53,6 +53,7 @@ pub fn summarise_packet(
         proto = match &parsed.link {
             LinkHeader::Ethernet(hdr) => format!("{}", hdr.ether_type()),
             LinkHeader::LinuxSll(hdr) => format!("{}", hdr.protocol()),
+            LinkHeader::LinuxSll2(hdr) => format!("{}", hdr.protocol()),
             LinkHeader::Loopback(hdr) => format!("Loopback {}", hdr.family_label()),
             LinkHeader::RawIp => "IP".to_string(),
         };

@@ -75,7 +75,7 @@ The dashboard is available while the capture process runs and closes when captur
 
 - `pcap.h` is missing: install the platform's libpcap development package and rebuild.
 - Live capture reports permission denied: rerun with the required interface privileges; offline PCAP analysis does not need them.
-- Every packet is reported as unsupported: check the capture's link type. NetScope supports Ethernet, Linux SLL v1, NULL/LOOP loopback, and raw IP.
+- Every packet is reported as unsupported: check the capture's link type. NetScope supports Ethernet, Linux SLL v1/v2, NULL/LOOP loopback, and raw IP.
 - No anomaly alert appears: verify the detector is enabled and its thresholds fit the trace. Pipeline plus enabled anomaly detection is rejected before input is opened.
 - A flow export is empty: only TCP and UDP create flows; ARP, ICMP, and ICMPv6 are decoded without flow records.
 - Flows are missing from the final export: expired or evicted flows have left the table. Enable an expired-flow sink as well as the final export to retain both sets of records.

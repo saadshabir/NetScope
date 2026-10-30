@@ -9,6 +9,7 @@
     {
       "file": "normal.pcap",
       "description": "TCP and partial TLS handshake, DNS query and response, and visible ClientHello SNI",
+      "linktype": 1,
       "packet_count": 8,
       "wire_bytes": 618,
       "pcap_bytes": 770,
@@ -25,6 +26,7 @@
     {
       "file": "port-scan.pcap",
       "description": "One source sends TCP SYN probes to sixteen destination ports",
+      "linktype": 1,
       "packet_count": 16,
       "wire_bytes": 864,
       "pcap_bytes": 1144,
@@ -41,6 +43,7 @@
     {
       "file": "syn-flood.pcap",
       "description": "Sixty-four synthetic sources send initial SYNs to one destination and port",
+      "linktype": 1,
       "packet_count": 64,
       "wire_bytes": 3456,
       "pcap_bytes": 4504,
@@ -57,6 +60,7 @@
     {
       "file": "protocol-edges.pcap",
       "description": "IPv6, QinQ, ICMP, truncated TCP, and an unsupported EtherType",
+      "linktype": 1,
       "packet_count": 6,
       "wire_bytes": 338,
       "pcap_bytes": 458,
@@ -68,6 +72,23 @@
         "transport_parse_errors": 1,
         "unsupported_packets": 1,
         "malformed_or_unsupported_packets": 2
+      }
+    },
+    {
+      "file": "linux-sll2.pcap",
+      "description": "SLL2 bidirectional IPv4 TCP, IPv6 UDP with Hop-by-Hop, QinQ UDP, ARP, and an unsupported protocol",
+      "linktype": 276,
+      "packet_count": 8,
+      "wire_bytes": 504,
+      "pcap_bytes": 656,
+      "sha256": "62b26724cfd2fd62e13b4e025504ffce71a5cd90d0753d4b4b1eb596622e4c94",
+      "expected_packet_accounting": {
+        "packets_with_network_header": 7,
+        "packets_with_transport_header": 6,
+        "packet_parse_errors": 0,
+        "transport_parse_errors": 0,
+        "unsupported_packets": 1,
+        "malformed_or_unsupported_packets": 1
       }
     }
   ]

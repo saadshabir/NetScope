@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Linux cooked capture v2 (SLL2, link type 276) parsing, shard routing, and packet details, with a deterministic PCAP fixture covering IPv4, IPv6, QinQ, and bidirectional flows.
 - Output-inspection commands in the quickstart and a dashboard endpoint reference with health and authenticated metrics examples.
 - Remote dashboard TLS/auth configuration and run-summary field guidance.
 - Five concise reader-facing pages for quickstart, reference, design, performance, and tool comparison; the README now links to them and the synthetic PCAP investigations.

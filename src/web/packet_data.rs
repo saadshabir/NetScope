@@ -92,6 +92,28 @@ fn push_link_layer<'a>(
                 ],
             });
         }
+        protocol::LinkHeader::LinuxSll2(sll2) => {
+            layers.push(web::messages::LayerDetail {
+                name: "Linux SLL2".into(),
+                fields: vec![
+                    (
+                        "Interface Index".into(),
+                        format!("{}", sll2.interface_index()),
+                    ),
+                    (
+                        "Packet Type".into(),
+                        format!("{} ({})", sll2.packet_type_label(), sll2.packet_type_raw()),
+                    ),
+                    ("ARPHRD".into(), format!("{}", sll2.arphrd_type_raw())),
+                    (
+                        "Address Length".into(),
+                        format!("{}", sll2.address_length()),
+                    ),
+                    ("Address".into(), protocol::sll::format_addr(sll2.address())),
+                    ("Protocol".into(), format!("{}", sll2.protocol())),
+                ],
+            });
+        }
         protocol::LinkHeader::Loopback(loopback) => {
             let encoding = match loopback.byte_order() {
                 protocol::loopback::LoopbackByteOrder::Native => "native-endian",

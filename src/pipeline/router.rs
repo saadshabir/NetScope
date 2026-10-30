@@ -6,7 +6,9 @@
 
 use std::hash::{Hash, Hasher};
 
-use crate::protocol::{LinkType, ipv6::locate_ipv6_payload};
+use crate::protocol::{
+    LinkType, ipv6::locate_ipv6_payload, sll::SLL_HEADER_LEN, sll2::SLL2_HEADER_LEN,
+};
 
 /// Compute the shard index for a raw Ethernet frame.
 ///
@@ -47,6 +49,7 @@ fn fast_flow_hash_with_linktype(data: &[u8], link_type: LinkType) -> u64 {
     match link_type {
         LinkType::Ethernet => fast_flow_hash_ethernet(data),
         LinkType::LinuxSll => fast_flow_hash_linux_sll(data),
+        LinkType::LinuxSll2 => fast_flow_hash_linux_sll2(data),
         LinkType::LoopbackNull | LinkType::LoopbackLoop => fast_flow_hash_ip_at_offset(data, 4),
         LinkType::RawIp => fast_flow_hash_ip_at_offset(data, 0),
         LinkType::Unsupported(_) => byte_hash(data),
@@ -60,35 +63,34 @@ fn fast_flow_hash_ethernet(data: &[u8]) -> u64 {
         return byte_hash(data);
     }
 
-    let mut ether_type = u16::from_be_bytes([data[12], data[13]]);
-    let mut ip_offset: usize = 14;
-
-    // Skip 802.1Q / 802.1ad VLAN tags (stacked allowed).
-    while ether_type == 0x8100 || ether_type == 0x88A8 {
-        if data.len() < ip_offset + 4 {
-            return byte_hash(data);
-        }
-        ether_type = u16::from_be_bytes([data[ip_offset + 2], data[ip_offset + 3]]);
-        ip_offset += 4;
-    }
-
-    match ether_type {
-        0x0800 => hash_ipv4(data, ip_offset),
-        0x86DD => hash_ipv6(data, ip_offset),
-        _ => byte_hash(data),
-    }
+    let ether_type = u16::from_be_bytes([data[12], data[13]]);
+    fast_flow_hash_ether_type(data, ether_type, 14)
 }
 
 #[inline]
 fn fast_flow_hash_linux_sll(data: &[u8]) -> u64 {
-    // Linux cooked capture v1 fixed header: 16 bytes.
-    if data.len() < 16 {
+    // Linux cooked capture v1: protocol at byte 14, payload at byte 16.
+    if data.len() < SLL_HEADER_LEN {
         return byte_hash(data);
     }
 
-    let mut ether_type = u16::from_be_bytes([data[14], data[15]]);
-    let mut ip_offset: usize = 16;
+    let ether_type = u16::from_be_bytes([data[14], data[15]]);
+    fast_flow_hash_ether_type(data, ether_type, SLL_HEADER_LEN)
+}
 
+#[inline]
+fn fast_flow_hash_linux_sll2(data: &[u8]) -> u64 {
+    // Linux cooked capture v2: protocol at byte 0, payload at byte 20.
+    if data.len() < SLL2_HEADER_LEN {
+        return byte_hash(data);
+    }
+
+    let ether_type = u16::from_be_bytes([data[0], data[1]]);
+    fast_flow_hash_ether_type(data, ether_type, SLL2_HEADER_LEN)
+}
+
+#[inline]
+fn fast_flow_hash_ether_type(data: &[u8], mut ether_type: u16, mut ip_offset: usize) -> u64 {
     // Optional 802.1Q / 802.1ad VLAN tags in the payload.
     while ether_type == 0x8100 || ether_type == 0x88A8 {
         if data.len() < ip_offset + 4 {
@@ -214,6 +216,65 @@ fn byte_hash(data: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linux_sll2_fixture_hashes_inner_flows_in_both_directions() {
+        let packets = crate::protocol::sll2::fixture_packets();
+        for (pair, ip_offset) in packets[..6].chunks_exact(2).zip([20, 20, 28]) {
+            let expected = fast_flow_hash_with_linktype(&pair[0][ip_offset..], LinkType::RawIp);
+            for packet in pair {
+                // Compare full hashes so a shard collision cannot hide bad offsets
+                // or an implementation that sends every SLL2 packet to shard zero.
+                assert_eq!(
+                    fast_flow_hash_with_linktype(packet, LinkType::LinuxSll2),
+                    expected
+                );
+                for workers in [1, 2, 3, 8, 17] {
+                    assert_eq!(
+                        shard_for_packet_with_linktype(packet, workers, LinkType::LinuxSll2),
+                        (expected as usize) % workers
+                    );
+                }
+
+                let mut changed_metadata = packet.clone();
+                changed_metadata[2..20].fill(0xff);
+                assert_eq!(
+                    fast_flow_hash_with_linktype(&changed_metadata, LinkType::LinuxSll2),
+                    expected,
+                    "SLL2 link metadata must not affect the flow hash"
+                );
+
+                let mut sll1 = vec![0u8; SLL_HEADER_LEN];
+                sll1[14..16].copy_from_slice(&packet[..2]);
+                sll1.extend_from_slice(&packet[SLL2_HEADER_LEN..]);
+                assert_eq!(
+                    fast_flow_hash_with_linktype(&sll1, LinkType::LinuxSll),
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn linux_sll2_fixture_truncations_and_non_ip_payloads_route_safely() {
+        let packets = crate::protocol::sll2::fixture_packets();
+        for packet in &packets {
+            for len in 0..=packet.len() {
+                let truncated = &packet[..len];
+                assert!(shard_for_packet_with_linktype(truncated, 7, LinkType::LinuxSll2) < 7);
+                assert_eq!(
+                    shard_for_packet_with_linktype(truncated, 0, LinkType::LinuxSll2),
+                    0
+                );
+                if len < SLL2_HEADER_LEN {
+                    assert_eq!(fast_flow_hash_linux_sll2(truncated), byte_hash(truncated));
+                }
+            }
+        }
+        for packet in &packets[6..] {
+            assert_eq!(fast_flow_hash_linux_sll2(packet), byte_hash(packet));
+        }
+    }
 
     fn make_tcp_ipv4_payload(
         src_ip: [u8; 4],

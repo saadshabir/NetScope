@@ -145,6 +145,22 @@ pub fn print_packet_detail(index: u64, timestamp: f64, raw_data: &[u8], packet: 
                 hdr.protocol_raw()
             );
         }
+        LinkHeader::LinuxSll2(hdr) => {
+            println!("    Type:        Linux SLL2");
+            println!("    Interface:   {}", hdr.interface_index());
+            println!(
+                "    Packet Type: {} ({})",
+                hdr.packet_type_label(),
+                hdr.packet_type_raw()
+            );
+            println!("    ARPHRD:      {}", hdr.arphrd_type_raw());
+            println!("    Address:     {}", format_link_address(hdr.address()));
+            println!(
+                "    Protocol:    {} (0x{:04x})",
+                hdr.protocol(),
+                hdr.protocol_raw()
+            );
+        }
         LinkHeader::Loopback(hdr) => {
             println!("    Type:        Loopback");
             println!(

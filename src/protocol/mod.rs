@@ -7,6 +7,7 @@ pub mod ipv4;
 pub mod ipv6;
 pub mod loopback;
 pub mod sll;
+pub mod sll2;
 pub mod tcp;
 pub mod tls;
 pub mod udp;
@@ -19,6 +20,7 @@ use std::net::IpAddr;
 pub enum LinkType {
     Ethernet,
     LinuxSll,
+    LinuxSll2,
     LoopbackNull,
     LoopbackLoop,
     RawIp,
@@ -30,6 +32,7 @@ impl LinkType {
         match value {
             1 => LinkType::Ethernet,
             113 => LinkType::LinuxSll,
+            276 => LinkType::LinuxSll2,
             0 => LinkType::LoopbackNull,
             108 => LinkType::LoopbackLoop,
             12 | 101 => LinkType::RawIp,
@@ -41,6 +44,7 @@ impl LinkType {
         match self {
             LinkType::Ethernet => 1,
             LinkType::LinuxSll => 113,
+            LinkType::LinuxSll2 => 276,
             LinkType::LoopbackNull => 0,
             LinkType::LoopbackLoop => 108,
             LinkType::RawIp => 12,
@@ -54,6 +58,7 @@ impl fmt::Display for LinkType {
         match self {
             LinkType::Ethernet => write!(f, "Ethernet"),
             LinkType::LinuxSll => write!(f, "Linux SLL"),
+            LinkType::LinuxSll2 => write!(f, "Linux SLL2"),
             LinkType::LoopbackNull => write!(f, "Loopback (NULL)"),
             LinkType::LoopbackLoop => write!(f, "Loopback (LOOP)"),
             LinkType::RawIp => write!(f, "Raw IP"),
@@ -211,6 +216,7 @@ pub struct ParsedPacket<'a> {
 pub enum LinkHeader<'a> {
     Ethernet(ethernet::EthernetHeader<'a>),
     LinuxSll(sll::LinuxSllHeader<'a>),
+    LinuxSll2(sll2::LinuxSll2Header<'a>),
     Loopback(loopback::LoopbackHeader<'a>),
     RawIp,
 }
@@ -220,6 +226,7 @@ impl fmt::Display for LinkHeader<'_> {
         match self {
             LinkHeader::Ethernet(h) => write!(f, "{}", h),
             LinkHeader::LinuxSll(h) => write!(f, "{}", h),
+            LinkHeader::LinuxSll2(h) => write!(f, "{}", h),
             LinkHeader::Loopback(h) => write!(f, "{}", h),
             LinkHeader::RawIp => write!(f, "Raw IP"),
         }
@@ -366,6 +373,12 @@ pub fn parse_packet_with_linktype(
             let payload = sll.payload();
             let ether_type = sll.protocol();
             (LinkHeader::LinuxSll(sll), payload, Some(ether_type))
+        }
+        LinkType::LinuxSll2 => {
+            let sll2 = sll2::LinuxSll2Header::parse(data)?;
+            let payload = sll2.payload();
+            let ether_type = sll2.protocol();
+            (LinkHeader::LinuxSll2(sll2), payload, Some(ether_type))
         }
         LinkType::LoopbackNull => {
             let loopback = loopback::LoopbackHeader::parse_null(data)?;
@@ -700,9 +713,12 @@ mod tests {
         assert_eq!(LinkType::from_pcap_value(101), LinkType::RawIp);
         assert_eq!(LinkType::from_pcap_value(108), LinkType::LoopbackLoop);
         assert_eq!(LinkType::from_pcap_value(113), LinkType::LinuxSll);
-        assert_eq!(LinkType::from_pcap_value(276), LinkType::Unsupported(276));
+        assert_eq!(LinkType::from_pcap_value(276), LinkType::LinuxSll2);
+        assert_eq!(LinkType::LinuxSll2.as_pcap_value(), 276);
+        assert_eq!(LinkType::LinuxSll2.to_string(), "Linux SLL2");
+        assert_eq!(LinkType::from_pcap_value(9999), LinkType::Unsupported(9999));
 
-        let result = parse_packet_with_linktype(&[], LinkType::Unsupported(276));
+        let result = parse_packet_with_linktype(&[], LinkType::Unsupported(9999));
         assert!(matches!(result, Err(ParseError::InvalidHeader(_))));
     }
 
