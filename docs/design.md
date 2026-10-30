@@ -30,7 +30,7 @@ Pipeline mode rejects enabled anomaly detection before opening the source. The r
 
 | Input layer | Recognized data | Flow or payload behavior |
 | --- | --- | --- |
-| Ethernet, Linux SLL v1, NULL/LOOP loopback, raw IP | Link type and supported inner network headers; Ethernet supports up to four 802.1Q/802.1ad tags. | Other link types, including SLL2, are reported unsupported. |
+| Ethernet, Linux SLL v1/v2, NULL/LOOP loopback, raw IP | Link type and supported inner network headers; Ethernet and Linux SLL v1/v2 support 802.1Q/802.1ad tags, retaining up to four tags. SLL2 includes the interface index. | Other link types are reported unsupported. |
 | ARP | Address and operation fields. | Decoded, but no flow is created. |
 | IPv4 / IPv6 | Address, lengths, and network fields; IPv6 walks at most 16 common extension headers. | Non-initial fragments are skipped. There is no fragment reassembly. |
 | TCP / UDP | Transport header fields and ports. | Bidirectional flows with directional counts. Malformed supported headers are classified separately. |

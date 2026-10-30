@@ -368,34 +368,115 @@ def protocol_edge_packets() -> Iterable[bytes]:
     yield ethernet(b"synthetic-unsupported-payload", 0x88B5)
 
 
+def linux_sll2(frame: bytes, *, interface_index: int, packet_type: int) -> bytes:
+    # Protocol, reserved, interface index, ARPHRD, packet type, address length,
+    # and an eight-byte address field, all multibyte fields in network order.
+    header = struct.pack(
+        "!HHIHBB8s", int.from_bytes(frame[12:14], "big"), 0,
+        interface_index, 1, packet_type, 6, SRC_MAC,
+    )
+    return header + frame[14:]
+
+
+def linux_sll2_packets() -> Iterable[bytes]:
+    # Three bidirectional flows. Metadata changes between directions so routing
+    # must use the inner flow rather than the cooked header or interface index.
+    for reverse in (False, True):
+        src, dst = "192.0.2.10", "198.51.100.20"
+        src_port, dst_port = 53000, 443
+        if reverse:
+            src, dst, src_port, dst_port = dst, src, dst_port, src_port
+        frame = ipv4_tcp_frame(
+            src, dst, src_port, dst_port, ident=40 + reverse,
+            flags=0x12 if reverse else 0x02, ack=2 if reverse else 0,
+        )
+        yield linux_sll2(
+            frame, interface_index=0x01020304 + reverse, packet_type=0 if reverse else 4,
+        )
+
+    for reverse in (False, True):
+        src, dst = "2001:db8::10", "2001:db8::20"
+        src_port, dst_port = 54000, 9000
+        if reverse:
+            src, dst, src_port, dst_port = dst, src, dst_port, src_port
+        hop_by_hop = bytes((17, 0, 0, 0, 0, 0, 0, 0))
+        segment = udp(src, dst, src_port, dst_port, b"sll2-ipv6")
+        frame = ethernet(ipv6(src, dst, 0, hop_by_hop + segment), ETHERNET_TYPE_IPV6)
+        yield linux_sll2(
+            frame, interface_index=7 + reverse, packet_type=0 if reverse else 4,
+        )
+
+    for reverse in (False, True):
+        src, dst = "192.0.2.30", "198.51.100.40"
+        src_port, dst_port = 55000, 9001
+        if reverse:
+            src, dst, src_port, dst_port = dst, src, dst_port, src_port
+        frame = ipv4_udp_frame(
+            src, dst, src_port, dst_port, b"sll2-qinq", ident=42 + reverse,
+            vlan_tags=((0x88A8, 100), (0x8100, 200)),
+        )
+        yield linux_sll2(
+            frame, interface_index=9 + reverse, packet_type=0 if reverse else 4,
+        )
+
+    arp = struct.pack(
+        "!HHBBH6s4s6s4s", 1, 0x0800, 6, 4, 1, SRC_MAC,
+        ipaddress.IPv4Address("192.0.2.10").packed, bytes(6),
+        ipaddress.IPv4Address("192.0.2.1").packed,
+    )
+    yield linux_sll2(ethernet(arp, 0x0806), interface_index=2, packet_type=1)
+    yield linux_sll2(
+        ethernet(b"sll2-unsupported", 0x88B5), interface_index=3, packet_type=2,
+    )
+
+
 FIXTURES = (
     (
         "normal.pcap",
         "TCP and partial TLS handshake, DNS query and response, and visible ClientHello SNI",
         normal_packets,
         250_000,
+        1,
     ),
     (
         "port-scan.pcap",
         "One source sends TCP SYN probes to sixteen destination ports",
         port_scan_packets,
         100_000,
+        1,
     ),
     (
         "syn-flood.pcap",
         "Sixty-four synthetic sources send initial SYNs to one destination and port",
         syn_flood_packets,
         50_000,
+        1,
     ),
     (
         "protocol-edges.pcap",
         "IPv6, QinQ, ICMP, truncated TCP, and an unsupported EtherType",
         protocol_edge_packets,
         250_000,
+        1,
+    ),
+    (
+        "linux-sll2.pcap",
+        "SLL2 bidirectional IPv4 TCP, IPv6 UDP with Hop-by-Hop, QinQ UDP, ARP, and an unsupported protocol",
+        linux_sll2_packets,
+        100_000,
+        276,
     ),
 )
 
 EXPECTED_PACKET_ACCOUNTING = {
+    "linux-sll2.pcap": {
+        "packets_with_network_header": 7,
+        "packets_with_transport_header": 6,
+        "packet_parse_errors": 0,
+        "transport_parse_errors": 0,
+        "unsupported_packets": 1,
+        "malformed_or_unsupported_packets": 1,
+    },
     "normal.pcap": {
         "packets_with_network_header": 8,
         "packets_with_transport_header": 8,
@@ -431,13 +512,15 @@ EXPECTED_PACKET_ACCOUNTING = {
 }
 
 
-def write_pcap(path: Path, packets: Iterable[bytes], interval_us: int) -> dict[str, int | str]:
+def write_pcap(
+    path: Path, packets: Iterable[bytes], interval_us: int, linktype: int = 1,
+) -> dict[str, int | str]:
     digest = hashlib.sha256()
     packet_count = 0
     wire_bytes = 0
     pcap_bytes = 24
     with path.open("wb") as output:
-        global_header = struct.pack("<IHHIIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1)
+        global_header = struct.pack("<IHHIIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, linktype)
         output.write(global_header)
         digest.update(global_header)
         for packet_count, packet in enumerate(packets, start=1):
@@ -468,15 +551,18 @@ def generate(output_dir: Path) -> dict[str, object]:
     output_dir.mkdir(parents=True, exist_ok=True)
     rng = random.Random(SYNTHETIC_SEED)
     fixtures = []
-    for filename, description, packet_factory, interval_us in FIXTURES:
+    for filename, description, packet_factory, interval_us, linktype in FIXTURES:
         packet_source = (
             packet_factory(rng) if filename == "normal.pcap" else packet_factory()
         )
-        metadata = write_pcap(output_dir / filename, packet_source, interval_us=interval_us)
+        metadata = write_pcap(
+            output_dir / filename, packet_source, interval_us=interval_us, linktype=linktype,
+        )
         fixtures.append(
             {
                 "file": filename,
                 "description": description,
+                "linktype": linktype,
                 **metadata,
                 "expected_packet_accounting": EXPECTED_PACKET_ACCOUNTING[filename],
             }

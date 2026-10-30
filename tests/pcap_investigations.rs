@@ -88,7 +88,7 @@ fn run_fixture_with_options(
         .arg("--alerts-jsonl")
         .arg(&alert_path);
     if show_packets {
-        command.arg("--no-quiet");
+        command.args(["--no-quiet", "-vv"]);
     } else {
         command.arg("--quiet");
     }
@@ -307,6 +307,26 @@ fn normal_and_protocol_edge_fixtures_reconcile_and_match_across_modes() {
     assert!(!edges_inline.stdout.contains("Success rate:"));
     assert!(edges_inline.stdout.contains("malformed transport:"));
     assert!(edges_inline.stdout.contains("unsupported protocol payload"));
+}
+
+#[test]
+fn linux_sll2_fixture_reconciles_and_preserves_bidirectional_flows_across_modes() {
+    let inline = run_fixture_with_options("linux-sll2.pcap", false, true, true);
+    let pipeline = run_fixture_with_options("linux-sll2.pcap", true, false, true);
+    assert_accounting("linux-sll2.pcap", &inline, false);
+    assert_accounting("linux-sll2.pcap", &pipeline, true);
+    assert_eq!(inline.flows.len(), 3);
+    assert_eq!(flow_facts(&inline.flows), flow_facts(&pipeline.flows));
+    for flow in &inline.flows {
+        assert_eq!(flow["packets_a_to_b"], 1);
+        assert_eq!(flow["packets_b_to_a"], 1);
+        assert_eq!(flow["packets_total"], 2);
+    }
+    assert!(inline.stdout.contains("Linux SLL2"));
+    assert!(inline.stdout.contains("Interface:   16909060"));
+    assert!(inline.stdout.contains("Packet Type: outgoing (4)"));
+    assert!(inline.stdout.contains("VLAN:100/200"));
+    assert!(inline.stdout.contains("IPv6:"));
 }
 
 #[test]
