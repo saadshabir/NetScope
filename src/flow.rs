@@ -1,6 +1,7 @@
 use crate::protocol::{NetworkHeader, ParsedPacket, TransportHeader};
 use std::net::IpAddr;
 
+mod application;
 mod export;
 mod key;
 mod model;
@@ -8,6 +9,7 @@ mod scale;
 mod tcp;
 mod tracker;
 
+pub use application::DnsFlowStats;
 pub use export::{ExpiredFlowCsvSink, write_flow_csv, write_flow_json};
 pub(crate) use key::{CompactFlowKey, FlowKeyV4, FlowKeyV6};
 pub use key::{Endpoint, FlowDirection, FlowKey, FlowProtocol};

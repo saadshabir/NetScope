@@ -236,6 +236,8 @@ fn flow_facts(flows: &[Value]) -> Vec<String> {
                 "bytes_b_to_a": flow["bytes_b_to_a"],
                 "packets_total": flow["packets_total"],
                 "bytes_total": flow["bytes_total"],
+                "dns": flow["dns"],
+                "tls_sni": flow["tls_sni"],
             })
             .to_string()
         })
@@ -278,6 +280,11 @@ fn normal_and_protocol_edge_fixtures_reconcile_and_match_across_modes() {
     assert_eq!(udp["packets_total"], 2);
     assert_eq!(udp["packets_a_to_b"], 1);
     assert_eq!(udp["packets_b_to_a"], 1);
+    assert_eq!(tcp["tls_sni"], "api.example.test");
+    assert_eq!(udp["dns"]["queries"], 1);
+    assert_eq!(udp["dns"]["matched_responses"], 1);
+    assert_eq!(udp["dns"]["unanswered_queries"], 0);
+    assert_eq!(udp["dns"]["response_latency_avg_ms"], 250.0);
     assert!(
         normal_inline
             .stdout
@@ -368,6 +375,58 @@ fn anomaly_fixtures_emit_versioned_inline_alerts_and_reject_pipeline_mode() {
     assert_eq!(flood_inline.alerts[0]["window_secs"], 5.0);
     assert_eq!(flood_inline.alerts[0]["thresholds"]["syn_count"], 8);
     assert_eq!(flood_inline.alerts[0]["observed"]["unique_sources"], 8);
+}
+
+#[test]
+fn expired_flow_csv_reopens_known_layouts_and_rejects_unknown_headers() {
+    let temp_dir = TempRunDir::new("expired-flow-csv");
+    let summary_path = temp_dir.file("summary.json");
+    let append_expired_flow = |path: &Path| {
+        Command::new(env!("CARGO_BIN_EXE_netscope"))
+            .arg("--read-pcap")
+            .arg(fixture_path("normal.pcap"))
+            .args(["--quiet", "--no-anomalies", "--max-flows", "1"])
+            .arg("--expired-flows-csv")
+            .arg(path)
+            .arg("--summary-json")
+            .arg(&summary_path)
+            .output()
+            .expect("netscope should run")
+    };
+
+    let fresh_path = temp_dir.file("fresh.csv");
+    assert!(append_expired_flow(&fresh_path).status.success());
+    let fresh = std::fs::read_to_string(&fresh_path).unwrap();
+    let current_header = fresh.lines().next().unwrap();
+    let (legacy_header, _) = current_header.split_once(",tls_sni,").unwrap();
+
+    for (label, header, columns) in [
+        ("current", format!("{current_header}\n"), 35),
+        ("bom", format!("\u{feff}{current_header}\r\n"), 35),
+        ("legacy", format!("{legacy_header}\n"), 25),
+    ] {
+        let path = temp_dir.file(&format!("{label}.csv"));
+        std::fs::write(&path, &header).unwrap();
+        let output = append_expired_flow(&path);
+        assert!(output.status.success(), "{label}: {:?}", output.stderr);
+        let csv = std::fs::read_to_string(&path).unwrap();
+        let row = csv.strip_prefix(&header).unwrap();
+        assert_eq!(row.lines().count(), 1);
+        assert_eq!(row.trim_end().split(',').count(), columns, "{label}");
+    }
+
+    let unknown = temp_dir.file("unknown.csv");
+    let original = "ts,reason,unknown\n1,timeout,existing\n";
+    std::fs::write(&unknown, original).unwrap();
+    assert!(!append_expired_flow(&unknown).status.success());
+    assert_eq!(std::fs::read_to_string(&unknown).unwrap(), original);
+    let summary: Value = serde_json::from_slice(&std::fs::read(summary_path).unwrap()).unwrap();
+    assert!(
+        summary["output_errors"][0]
+            .as_str()
+            .unwrap()
+            .contains("unrecognized expired-flow CSV header")
+    );
 }
 
 #[test]

@@ -154,6 +154,21 @@ impl<'a> DnsMessage<'a> {
         read_u16(self.data, 4)
     }
 
+    /// Match the first question by its labels, type, and class. Length prefixes
+    /// preserve label boundaries even when a label contains a literal dot.
+    pub(crate) fn question_key(&self) -> Result<Box<[u8]>, ParseError> {
+        let mut key = Vec::new();
+        let consumed = visit_name(self.data, DNS_HEADER_LEN, |label| {
+            key.push(label.len() as u8);
+            key.extend(label.iter().map(u8::to_ascii_lowercase));
+        })?;
+        let fields_offset = DNS_HEADER_LEN + consumed;
+        ensure_len(self.data, fields_offset, 4)?;
+        key.push(0);
+        key.extend_from_slice(&self.data[fields_offset..fields_offset + 4]);
+        Ok(key.into_boxed_slice())
+    }
+
     #[inline]
     pub fn answer_count(&self) -> u16 {
         read_u16(self.data, 6)
@@ -424,7 +439,7 @@ fn parse_question<'a>(
     data: &'a [u8],
     offset: usize,
 ) -> Result<(DnsQuestion<'a>, usize), ParseError> {
-    let (_, consumed) = decode_name(data, offset)?;
+    let consumed = visit_name(data, offset, |_| {})?;
     let fields_offset = offset
         .checked_add(consumed)
         .ok_or_else(|| ParseError::InvalidHeader("dns question offset overflow".into()))?;
@@ -447,7 +462,7 @@ fn parse_question<'a>(
 }
 
 fn parse_record<'a>(data: &'a [u8], offset: usize) -> Result<(DnsRecord<'a>, usize), ParseError> {
-    let (_, consumed) = decode_name(data, offset)?;
+    let consumed = visit_name(data, offset, |_| {})?;
     let fields_offset = offset
         .checked_add(consumed)
         .ok_or_else(|| ParseError::InvalidHeader("dns rr offset overflow".into()))?;
@@ -480,9 +495,23 @@ fn parse_record<'a>(data: &'a [u8], offset: usize) -> Result<(DnsRecord<'a>, usi
 }
 
 fn decode_name(data: &[u8], start: usize) -> Result<(String, usize), ParseError> {
+    let mut labels = Vec::new();
+    let consumed = visit_name(data, start, |label| labels.push(format_label(label)))?;
+    let name = if labels.is_empty() {
+        ".".to_string()
+    } else {
+        labels.join(".")
+    };
+    Ok((name, consumed))
+}
+
+fn visit_name(
+    data: &[u8],
+    start: usize,
+    mut visit_label: impl FnMut(&[u8]),
+) -> Result<usize, ParseError> {
     ensure_len(data, start, 1)?;
 
-    let mut labels = Vec::new();
     let mut cursor = start;
     let mut consumed = 0usize;
     let mut jumped = false;
@@ -557,7 +586,7 @@ fn decode_name(data: &[u8], start: usize) -> Result<(String, usize), ParseError>
             ));
         }
 
-        if !labels.is_empty() {
+        if labels_seen > 1 {
             total_name_len += 1;
         }
         total_name_len += label_len;
@@ -567,16 +596,11 @@ fn decode_name(data: &[u8], start: usize) -> Result<(String, usize), ParseError>
             ));
         }
 
-        labels.push(format_label(&data[cursor..cursor + label_len]));
+        visit_label(&data[cursor..cursor + label_len]);
         cursor += label_len;
     }
 
-    let name = if labels.is_empty() {
-        ".".to_string()
-    } else {
-        labels.join(".")
-    };
-    Ok((name, consumed))
+    Ok(consumed)
 }
 
 #[inline]

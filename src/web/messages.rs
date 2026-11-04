@@ -89,6 +89,8 @@ pub struct FlowInfo {
     pub rtt_ewma_ms: Option<f64>,
     pub retransmissions: u64,
     pub out_of_order: u64,
+    pub dns: Option<crate::flow::DnsFlowStats>,
+    pub tls_sni: Option<Box<str>>,
 }
 
 impl FlowInfo {
@@ -118,6 +120,8 @@ impl FlowInfo {
             rtt_ewma_ms: snap.rtt_ewma_ms,
             retransmissions: snap.retransmissions,
             out_of_order: snap.out_of_order,
+            dns: snap.dns,
+            tls_sni: snap.tls_sni.clone(),
         }
     }
 }
