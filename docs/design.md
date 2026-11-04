@@ -35,8 +35,12 @@ Pipeline mode rejects enabled anomaly detection before opening the source. The r
 | IPv4 / IPv6 | Address, lengths, and network fields; IPv6 walks at most 16 common extension headers. | Non-initial fragments are skipped. There is no fragment reassembly. |
 | TCP / UDP | Transport header fields and ports. | Bidirectional flows with directional counts. Malformed supported headers are classified separately. |
 | ICMP / ICMPv6 | Type/code and echo identifier/sequence when present. | Decoded, but no flow is created. |
-| DNS | UDP involving port 53; first query question and response section counts. | Packet-level decode only; no DNS-over-TCP or encrypted DNS inspection. |
-| TLS | Best-effort SNI from a complete ClientHello in one TCP payload. | No TCP stream reassembly; split ClientHello messages can be missed and ECH can conceal SNI. |
+| DNS | UDP involving port 53, with packet-level question and response decoding. | Standard queries are correlated with replies to report latency, NXDOMAIN, SERVFAIL, and unanswered queries. DNS-over-TCP and encrypted DNS are outside this scope. |
+| TLS | Best-effort SNI from a complete ClientHello in one TCP payload. | The first visible SNI is retained on the flow. Split ClientHello messages can be missed and ECH can conceal SNI. |
+
+DNS uses the UDP flow, reverse direction, transaction ID, and case-insensitive question name, type, and class to match replies. An error reply with an empty question section can match a unique pending transaction by flow, direction, and ID. Identical queries are coalesced while pending, with latency measured from the first observed query. A reply must have a timestamp at or after that query. [RFC 5452, section 9.1](https://www.rfc-editor.org/rfc/rfc5452.html#section-9.1), [RFC 4343, section 2](https://www.rfc-editor.org/rfc/rfc4343.html#section-2).
+
+Pending DNS transactions are eligible for matching for five seconds and are limited to 32 per flow and 4,096 per tracker. Inline mode has one tracker and pipeline mode has one per worker. The tracker uses a monotonic watermark for expiry and releases pending records on flow removal. Queries beyond either capacity limit are counted separately, even when the flow limit is disabled. DNS and TLS metadata are allocated only for flows with relevant observations, including in scale mode.
 
 TCP state, client direction, RTT, retransmission, and out-of-order fields are inferred from captured packets. They do not reconstruct a TCP byte stream. Capture-file support is limited by libpcap plus the link types above; classic PCAP is the checked-in and reproducible baseline. PCAPNG support is broader but has only a minimal single-interface Ethernet verification in the current evidence.
 

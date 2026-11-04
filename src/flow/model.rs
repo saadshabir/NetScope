@@ -2,7 +2,10 @@ use serde::Serialize;
 use std::fmt;
 
 use super::scale::ScaleFlowEntry;
-use super::{Endpoint, FlowDirection, FlowKey, FlowProtocol, SeqStatus, TcpFlags, TcpSeqTracker};
+use super::{
+    DnsFlowStats, Endpoint, FlowDirection, FlowKey, FlowProtocol, SeqStatus, TcpFlags,
+    TcpSeqTracker,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -281,6 +284,8 @@ pub struct FlowSnapshot {
     pub rtt_min_ms: Option<f64>,
     pub rtt_ewma_ms: Option<f64>,
     pub rtt_samples: u64,
+    pub dns: Option<DnsFlowStats>,
+    pub tls_sni: Option<Box<str>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -346,6 +351,8 @@ impl FlowSnapshot {
             rtt_min_ms: entry.rtt_min_ms,
             rtt_ewma_ms: entry.rtt_ewma_ms,
             rtt_samples: entry.rtt_samples,
+            dns: None,
+            tls_sni: None,
         }
     }
 
@@ -383,6 +390,8 @@ impl FlowSnapshot {
             rtt_min_ms: None,
             rtt_ewma_ms: None,
             rtt_samples: 0,
+            dns: None,
+            tls_sni: None,
         }
     }
 }

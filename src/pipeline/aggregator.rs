@@ -673,6 +673,8 @@ mod tests {
             rtt_min_ms: None,
             rtt_ewma_ms: None,
             rtt_samples: 0,
+            dns: None,
+            tls_sni: None,
         }
     }
 

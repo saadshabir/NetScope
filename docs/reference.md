@@ -39,7 +39,11 @@ Settings available only through TOML include `capture.buffer_size_mb`, `capture.
 
 Use an expired-flow sink together with a final export to retain removed and remaining flows. A tuple seen again after removal creates a new flow record. Final JSON/CSV, summary JSON, alert JSONL, expired-flow JSONL, and unrotated PCAP outputs replace existing files; expired-flow CSV appends and writes a header only when the file is empty. Use fresh output paths for each investigation.
 
-Flow JSON is an array of records with `protocol`, `endpoint_a`/`endpoint_b` (`ip` and `port`), `first_seen`, `last_seen`, `duration_secs`, directional and total packet/byte counts, `avg_bps`, and TCP tracking fields (`tcp_state`, `client`, retransmission/order counts, RTT samples). CSV uses the same data as one row per flow. Flow endpoint order is canonical; the A-to-B and B-to-A counts preserve direction. TCP state and tracking values are inferred from observed packets, not stream reassembly. Scale mode keeps RTT values null and retransmission/order counters at zero because those analyses are disabled. CSV is emitted as plain comma-separated numeric, enum, and IP fields without quoting.
+Flow JSON is an array of records with `protocol`, `endpoint_a`/`endpoint_b` (`ip` and `port`), `first_seen`, `last_seen`, `duration_secs`, directional and total packet/byte counts, `avg_bps`, and TCP tracking fields (`tcp_state`, `client`, retransmission/order counts, RTT samples). CSV uses the same data as one row per flow. Flow endpoint order is canonical, and the A-to-B and B-to-A counts preserve direction. TCP state and tracking values are inferred from observed packets. Scale mode keeps RTT values null and retransmission/order counters at zero because those analyses are disabled.
+
+`tls_sni` holds the first visible TLS server name on the flow. The `dns` object contains `queries` admitted to tracking, `matched_responses`, and `unanswered_queries`. Unanswered includes tracked queries still pending at the time of the snapshot and those whose matching window elapsed. `tracking_limit_hits` counts query observations that could not be admitted because storage was full. `nxdomain` and `servfail` count matched replies with those codes. `response_latency_min_ms`, `response_latency_avg_ms`, and `response_latency_max_ms` summarize matched replies and are null until the first match. See [DNS matching and limits](design.md#decode-and-tracking-scope).
+
+Unavailable `dns` and `tls_sni` fields are null in JSON and blank in CSV. CSV appends `tls_sni` and the flattened `dns_` columns after the TCP fields. A pre-existing expired-flow CSV with the original header continues to receive rows in its original layout. NetScope rejects unrecognized headers before appending. Use a fresh expired-flow CSV path to record the new fields.
 
 Input PCAPs, the config file, TLS/auth files, and all outputs must have distinct file identities. Validation rejects output aliases through relative paths, symlinks, hard links, and the rotated PCAP filename namespace before opening writers.
 
@@ -89,7 +93,7 @@ curl -fsS http://127.0.0.1:8080/api/health
 curl -fsS http://127.0.0.1:8080/metrics
 ```
 
-Capture metrics update on dashboard ticks; they can lag behind packet processing. Use the final run summary for reconciled accounting and unavailable-counter semantics. HTTP Basic auth and TLS apply to every endpoint when enabled.
+Capture metrics update on dashboard ticks and can lag behind packet processing. The Top Flows table displays DNS correlation statistics and visible TLS SNI in its Details column. Use the final run summary for reconciled accounting and unavailable-counter semantics. HTTP Basic auth and TLS apply to every endpoint when enabled.
 
 The dashboard allows up to 32 WebSocket connections. Client messages and frames are limited to 4 KiB, with 60 requests per second per connection; clients exceeding these limits disconnect. Sends time out after five seconds. When ticks are delayed or dropped, queued dashboard samples are capped at 8,192 packets and 1,024 alerts; excess samples are omitted from the dashboard. Capture accounting and file outputs are unaffected.
 

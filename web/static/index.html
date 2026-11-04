@@ -372,7 +372,7 @@ tbody tr.selected { background: #1f3a5f; }
             <th>Destination</th>
             <th>Rate</th>
             <th>Total</th>
-            <th>State</th>
+            <th>Details</th>
           </tr>
         </thead>
         <tbody id="flowsBody"></tbody>
@@ -827,6 +827,18 @@ function formatFlowRate(deltaMbps) {
     : deltaMbps.toFixed(2) + ' Mbps';
 }
 
+function formatFlowDetails(flow) {
+  if (flow.dns) {
+    const dns = flow.dns;
+    const latency = dns.response_latency_avg_ms == null
+      ? ''
+      : ` · ${dns.response_latency_avg_ms.toFixed(2)} ms avg`;
+    const limited = dns.tracking_limit_hits > 0 ? ` · ${dns.tracking_limit_hits} over limit` : '';
+    return `DNS ${dns.unanswered_queries}/${dns.queries} unanswered · ${dns.nxdomain} NXDOMAIN · ${dns.servfail} SERVFAIL${latency}${limited}`;
+  }
+  return [flow.tcp_state, flow.tls_sni].filter(Boolean).join(' · ');
+}
+
 function flowRowSignature(flow) {
   return [
     flow.protocol,
@@ -836,7 +848,7 @@ function flowRowSignature(flow) {
     flow.dst_port,
     formatFlowRate(flow.delta_mbps),
     formatBytes(flow.bytes_total),
-    flow.tcp_state || ''
+    formatFlowDetails(flow)
   ].join('|');
 }
 
@@ -860,7 +872,7 @@ function renderFlowRow(row, rank, flow) {
   setCellText(row.cells[3], `${flow.dst_ip}:${flow.dst_port}`);
   setCellText(row.cells[4], rate);
   setCellText(row.cells[5], formatBytes(flow.bytes_total));
-  setCellText(row.cells[6], flow.tcp_state || '');
+  setCellText(row.cells[6], formatFlowDetails(flow));
 }
 
 function updateFlowTable(flows, renderTsMs) {

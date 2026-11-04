@@ -53,14 +53,17 @@ fn command() -> Command {
 }
 
 #[test]
-fn every_capture_output_is_private_even_when_overwriting_public_files() {
+fn every_capture_output_is_private_even_when_existing_files_are_public() {
     let dir = TempDir::new();
     for existing in [false, true] {
         let mut cmd = command();
         for (idx, flag) in OUTPUT_FLAGS.iter().enumerate() {
             let path = dir.0.join(format!("output-{idx}"));
             if existing {
-                std::fs::write(&path, b"old output\n").unwrap();
+                // Keep the valid header created by the first run for the append-only sink.
+                if *flag != "--expired-flows-csv" {
+                    std::fs::write(&path, b"old output\n").unwrap();
+                }
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
             }
             cmd.arg(flag).arg(path);

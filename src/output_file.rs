@@ -36,7 +36,7 @@ fn open(path: &Path, mode: Mode) -> io::Result<File> {
         }
     }
     if matches!(mode, Mode::Append) {
-        options.append(true);
+        options.read(true).append(true);
     }
     #[cfg(unix)]
     {

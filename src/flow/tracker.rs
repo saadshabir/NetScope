@@ -9,6 +9,7 @@ use crate::protocol::{NetworkHeader, ParsedPacket, TransportHeader};
 
 #[cfg(test)]
 use super::Endpoint;
+use super::application::ApplicationFlows;
 use super::{
     CompactFlowKey, ExpiredFlowEvent, ExpiredFlowReason, FlowDelta, FlowEntry, FlowKey, FlowKeyV4,
     FlowKeyV6, FlowProtocol, FlowSnapshot, ScaleFlowEntry, TcpFlags, tcp_sequence_len,
@@ -77,6 +78,7 @@ enum ParsedFlowIps {
 #[derive(Debug)]
 pub struct FlowTracker {
     store: FlowStore,
+    application: ApplicationFlows,
     timeout_secs: f64,
     max_flows: usize,
     last_prune: f64,
@@ -125,6 +127,7 @@ impl FlowTracker {
 
         FlowTracker {
             store,
+            application: ApplicationFlows::new(),
             timeout_secs,
             max_flows,
             last_prune: 0.0,
@@ -237,6 +240,7 @@ impl FlowTracker {
         packet: &ParsedPacket<'_>,
         mut out: Option<&mut Vec<ExpiredFlowEvent>>,
     ) {
+        self.application.advance(ts);
         let (ips, skip_flow) = match &packet.network {
             Some(NetworkHeader::Ipv4(hdr)) => {
                 let skip = hdr.fragment_offset() != 0;
@@ -300,6 +304,7 @@ impl FlowTracker {
                 self.evict_one(ts, out.as_deref_mut());
             }
         }
+        self.application.observe(compact_key, direction, ts, packet);
         let mut is_new = false;
         match &mut self.store {
             FlowStore::Full(flows) => {
@@ -403,7 +408,7 @@ impl FlowTracker {
             // Most runs need only removal accounting. Build a snapshot only
             // when an expired-flow sink will consume it.
             let collect = out.is_some();
-            let flow = match (&mut self.store, key) {
+            let mut flow = match (&mut self.store, key) {
                 (FlowStore::Full(flows), key) => {
                     let flow_key = key.to_flow_key();
                     let entry = flows.remove(&flow_key).expect("clock flow exists");
@@ -430,6 +435,7 @@ impl FlowTracker {
                     })
                 }
             };
+            self.application.remove(key, flow.as_mut());
             self.stats.evicted = self.stats.evicted.saturating_add(1);
             if let (Some(out), Some(flow)) = (out.as_mut(), flow) {
                 out.push(ExpiredFlowEvent {
@@ -455,6 +461,7 @@ impl FlowTracker {
         now: f64,
         mut out: Option<&mut Vec<ExpiredFlowEvent>>,
     ) -> usize {
+        self.application.advance(now);
         if now < self.last_prune {
             self.last_prune = now;
             return 0;
@@ -472,23 +479,25 @@ impl FlowTracker {
 
         let collect = out.is_some();
         let (stats_expired, stats_evicted) = (&mut self.stats.expired, &mut self.stats.evicted);
-        let mut record_expired = |reason: ExpiredFlowReason, flow: Option<FlowSnapshot>| {
-            match reason {
-                ExpiredFlowReason::Timeout => {
-                    *stats_expired = stats_expired.saturating_add(1);
+        let mut record_expired =
+            |key, reason: ExpiredFlowReason, mut flow: Option<FlowSnapshot>| {
+                self.application.remove(key, flow.as_mut());
+                match reason {
+                    ExpiredFlowReason::Timeout => {
+                        *stats_expired = stats_expired.saturating_add(1);
+                    }
+                    ExpiredFlowReason::Eviction => {
+                        *stats_evicted = stats_evicted.saturating_add(1);
+                    }
                 }
-                ExpiredFlowReason::Eviction => {
-                    *stats_evicted = stats_evicted.saturating_add(1);
+                if let (Some(buf), Some(flow)) = (out.as_mut(), flow) {
+                    (**buf).push(ExpiredFlowEvent {
+                        ts: now,
+                        reason,
+                        flow,
+                    });
                 }
-            }
-            if let (Some(buf), Some(flow)) = (out.as_mut(), flow) {
-                (**buf).push(ExpiredFlowEvent {
-                    ts: now,
-                    reason,
-                    flow,
-                });
-            }
-        };
+            };
 
         let mut removed = 0;
         let mut oldest_last_seen = f64::INFINITY;
@@ -499,6 +508,7 @@ impl FlowTracker {
                         if now - entry.last_seen > self.timeout_secs {
                             removed += 1;
                             record_expired(
+                                CompactFlowKey::from_flow_key(key).expect("tracked flow key"),
                                 ExpiredFlowReason::Timeout,
                                 collect.then(|| FlowSnapshot::from_entry(key, entry)),
                             );
@@ -525,6 +535,7 @@ impl FlowTracker {
                         if let Some(entry) = flows.remove(&key) {
                             removed += 1;
                             record_expired(
+                                CompactFlowKey::from_flow_key(&key).expect("tracked flow key"),
                                 ExpiredFlowReason::Eviction,
                                 collect.then(|| FlowSnapshot::from_entry(&key, &entry)),
                             );
@@ -538,6 +549,7 @@ impl FlowTracker {
                         if now - entry.last_seen() > self.timeout_secs {
                             removed += 1;
                             record_expired(
+                                CompactFlowKey::V4(*key),
                                 ExpiredFlowReason::Timeout,
                                 collect.then(|| {
                                     FlowSnapshot::from_scale_entry(
@@ -561,6 +573,7 @@ impl FlowTracker {
                         if now - entry.last_seen() > self.timeout_secs {
                             removed += 1;
                             record_expired(
+                                CompactFlowKey::V6(*key),
                                 ExpiredFlowReason::Timeout,
                                 collect.then(|| {
                                     FlowSnapshot::from_scale_entry(
@@ -604,6 +617,7 @@ impl FlowTracker {
                                     removed += 1;
                                     let flow_key = CompactFlowKey::V4(v4).to_flow_key();
                                     record_expired(
+                                        CompactFlowKey::V4(v4),
                                         ExpiredFlowReason::Eviction,
                                         collect.then(|| {
                                             FlowSnapshot::from_scale_entry(&flow_key, &entry)
@@ -616,6 +630,7 @@ impl FlowTracker {
                                     removed += 1;
                                     let flow_key = CompactFlowKey::V6(v6).to_flow_key();
                                     record_expired(
+                                        CompactFlowKey::V6(v6),
                                         ExpiredFlowReason::Eviction,
                                         collect.then(|| {
                                             FlowSnapshot::from_scale_entry(&flow_key, &entry)
@@ -744,7 +759,10 @@ impl FlowTracker {
                 for d in deltas {
                     if let Some(entry) = flows.get_mut(&d.key) {
                         entry.last_report_bytes_web = entry.total_bytes();
-                        let snap = FlowSnapshot::from_entry(&d.key, entry);
+                        let key = CompactFlowKey::from_flow_key(&d.key).expect("tracked flow key");
+                        let snap = self
+                            .application
+                            .enrich(key, FlowSnapshot::from_entry(&d.key, entry));
                         result.push((d, snap));
                     }
                 }
@@ -770,7 +788,10 @@ impl FlowTracker {
                             if let Some(entry) = flows_v4.get_mut(&key) {
                                 entry.mark_web_reported();
                                 let flow_key = CompactFlowKey::V4(key).to_flow_key();
-                                let snap = FlowSnapshot::from_scale_entry(&flow_key, entry);
+                                let snap = self.application.enrich(
+                                    compact_key,
+                                    FlowSnapshot::from_scale_entry(&flow_key, entry),
+                                );
                                 result.push((
                                     FlowDelta {
                                         key: flow_key,
@@ -784,7 +805,10 @@ impl FlowTracker {
                             if let Some(entry) = flows_v6.get_mut(&key) {
                                 entry.mark_web_reported();
                                 let flow_key = CompactFlowKey::V6(key).to_flow_key();
-                                let snap = FlowSnapshot::from_scale_entry(&flow_key, entry);
+                                let snap = self.application.enrich(
+                                    compact_key,
+                                    FlowSnapshot::from_scale_entry(&flow_key, entry),
+                                );
                                 result.push((
                                     FlowDelta {
                                         key: flow_key,
@@ -805,19 +829,29 @@ impl FlowTracker {
         let mut flows: Vec<FlowSnapshot> = match &self.store {
             FlowStore::Full(table) => table
                 .iter()
-                .map(|(key, entry)| FlowSnapshot::from_entry(key, entry))
+                .map(|(key, entry)| {
+                    let compact = CompactFlowKey::from_flow_key(key).expect("tracked flow key");
+                    self.application
+                        .enrich(compact, FlowSnapshot::from_entry(key, entry))
+                })
                 .collect(),
             FlowStore::Scale {
                 flows_v4, flows_v6, ..
             } => {
                 let mut out = Vec::with_capacity(flows_v4.len() + flows_v6.len());
                 out.extend(flows_v4.iter().map(|(key, entry)| {
-                    let flow_key = CompactFlowKey::V4(*key).to_flow_key();
-                    FlowSnapshot::from_scale_entry(&flow_key, entry)
+                    let key = CompactFlowKey::V4(*key);
+                    self.application.enrich(
+                        key,
+                        FlowSnapshot::from_scale_entry(&key.to_flow_key(), entry),
+                    )
                 }));
                 out.extend(flows_v6.iter().map(|(key, entry)| {
-                    let flow_key = CompactFlowKey::V6(*key).to_flow_key();
-                    FlowSnapshot::from_scale_entry(&flow_key, entry)
+                    let key = CompactFlowKey::V6(*key);
+                    self.application.enrich(
+                        key,
+                        FlowSnapshot::from_scale_entry(&key.to_flow_key(), entry),
+                    )
                 }));
                 out
             }
@@ -878,10 +912,12 @@ impl FlowTracker {
                 out.sort_unstable_by(|a, b| b.0.delta_bytes.cmp(&a.0.delta_bytes));
                 out.truncate(n.min(out.len()));
 
-                for (delta, _) in &out {
+                for (delta, snapshot) in &mut out {
                     if let Some(entry) = flows.get_mut(&delta.key) {
                         entry.last_report_bytes_web = entry.total_bytes();
                     }
+                    let key = CompactFlowKey::from_flow_key(&delta.key).expect("tracked flow key");
+                    self.application.fill_snapshot(key, snapshot);
                 }
 
                 out
@@ -951,7 +987,7 @@ impl FlowTracker {
                                 key: compact_key.to_flow_key(),
                                 delta_bytes,
                             },
-                            snapshot,
+                            self.application.enrich(compact_key, snapshot),
                         )
                     })
                     .collect()
