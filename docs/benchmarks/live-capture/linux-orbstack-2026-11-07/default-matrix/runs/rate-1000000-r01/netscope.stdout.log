@@ -1,0 +1,31 @@
+NetScope v0.1.0
+Capturing on interface: veth-ns-rx
+Filter: ip and tcp dst port 443 and dst host 203.0.113.1
+Processing 5000000 packets...
+Datalink: Ethernet
+Pipeline: 2 worker shards
+
+NETSCOPE_READY {"capture_buffer_size_mb_requested":8,"channel_capacity":8192,"event":"netscope.capture.ready","filter":"ip and tcp dst port 443 and dst host 203.0.113.1","immediate_mode":false,"interface":"veth-ns-rx","pipeline_enabled":true,"promiscuous":false,"requested_workers":2,"schema_version":1,"snaplen":65535,"timeout_ms":20,"workers":2}
+
+==================================================
+Capture complete (pipeline mode; status: success).
+  Packets captured:  5000000
+  Input wire bytes:   270000000
+  Packets classified:  5000000
+  Network headers:    5000000
+  Transport headers:   5000000
+  Packet parse errors: 0
+  Malformed transport: 0
+  Unsupported packets:  0
+  Malformed/unsupported total: 0
+  Dispatched frames:  5000000
+  Dispatch drops:    0
+  Worker processed:   5000000
+  Worker failures:    0
+  Flows created:      1
+  Flows expired:      0
+  Flows evicted:      0
+  Alerts emitted:     0
+  Elapsed:            11.771s
+  Kernel/interface drops: 0/0
+==================================================

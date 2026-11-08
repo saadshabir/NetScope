@@ -1,0 +1,26 @@
+[capture]
+snaplen = 65535
+timeout_ms = 20
+buffer_size_mb = 8
+promiscuous = false
+immediate_mode = false
+
+[flow]
+timeout_secs = 0.0
+max_flows = 0
+
+[stats]
+enabled = false
+
+[analysis]
+rtt = false
+retrans = false
+out_of_order = false
+
+[analysis.anomalies]
+enabled = false
+
+[pipeline]
+enabled = true
+workers = 2
+channel_capacity = 8192

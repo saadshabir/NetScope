@@ -1,0 +1,23 @@
+	Command being timed: "/bench/target/release/netscope --config /bench/default-matrix/runs/rate-250000-r03/config.toml --interface veth-ns-rx --filter ip and tcp dst port 443 and dst host 203.0.113.1 --pipeline --workers 2 --quiet --count 1250000 --summary-json /bench/default-matrix/runs/rate-250000-r03/summary.json --write-pcap /bench/default-matrix/runs/rate-250000-r03/captured.pcap"
+	User time (seconds): 0.56
+	System time (seconds): 1.32
+	Percent of CPU this job got: 37%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:05.00
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 48812
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 3067
+	Voluntary context switches: 52858
+	Involuntary context switches: 468
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 170912
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

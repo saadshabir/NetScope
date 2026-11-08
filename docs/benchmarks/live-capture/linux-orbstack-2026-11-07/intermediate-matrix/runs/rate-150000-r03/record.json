@@ -1,0 +1,232 @@
+{
+  "captured_pcap": {
+    "bytes": 70000024,
+    "path": "/bench/intermediate-matrix/runs/rate-150000-r03/captured.pcap",
+    "sha256": "ce7d72d8fd62f08dac29823663a4d0431a176bdd4f1ea6b9e28a3b300c0993db"
+  },
+  "classification": "zero_observed_loss",
+  "classification_reasons": [],
+  "commands": {
+    "netscope": [
+      "/usr/bin/time",
+      "-v",
+      "-o",
+      "/bench/intermediate-matrix/runs/rate-150000-r03/netscope.time.txt",
+      "/bench/target/release/netscope",
+      "--config",
+      "/bench/intermediate-matrix/runs/rate-150000-r03/config.toml",
+      "--interface",
+      "veth-ns-rx",
+      "--filter",
+      "ip and tcp dst port 443 and dst host 203.0.113.1",
+      "--pipeline",
+      "--workers",
+      "2",
+      "--quiet",
+      "--count",
+      "1000000",
+      "--summary-json",
+      "/bench/intermediate-matrix/runs/rate-150000-r03/summary.json",
+      "--write-pcap",
+      "/bench/intermediate-matrix/runs/rate-150000-r03/captured.pcap"
+    ],
+    "tcpreplay": [
+      "tcpreplay",
+      "--intf1",
+      "veth-ns-tx",
+      "--pps",
+      "150000",
+      "--loop=1",
+      "--limit=1000000",
+      "--stats=1",
+      "--no-flow-stats",
+      "/bench/intermediate-matrix/workload/steady-flow-5000000.pcap"
+    ]
+  },
+  "completed_at_utc": "2026-11-08T04:08:48Z",
+  "effective_settings_requested": {
+    "capture_buffer_size_mb_requested": 8,
+    "channel_capacity": 8192,
+    "filter": "ip and tcp dst port 443 and dst host 203.0.113.1",
+    "immediate_mode": false,
+    "interface": "veth-ns-rx",
+    "pipeline_enabled": true,
+    "promiscuous": false,
+    "snaplen": 65535,
+    "timeout_ms": 20,
+    "workers": 2
+  },
+  "identifier_reconciliation": {
+    "duplicate_sequence_ids": 0,
+    "live_filter_match_count": 1000000,
+    "method": "deterministic steady-flow TCP sequence field; expected sequence IDs are 0,2,...,2*(N-1)",
+    "missing_sequence_ids": 0,
+    "pcap_parse_error": null,
+    "pcap_records": 1000000,
+    "tcp_sequence_count": 1000000,
+    "unexpected_sequence_packets": 0,
+    "unique_valid_sequence_ids": 1000000
+  },
+  "interface_counter_deltas": {
+    "capture_rx_dropped": 0,
+    "capture_rx_errors": 0,
+    "capture_rx_packets": 1000000,
+    "sender_tx_dropped": 0,
+    "sender_tx_errors": 0,
+    "sender_tx_packets": 1000000
+  },
+  "interface_setup": {
+    "capture": "veth-ns-rx",
+    "sender": "veth-ns-tx"
+  },
+  "netscope_exit_code": 0,
+  "netscope_summary": {
+    "alerts_emitted": 0,
+    "application_version": "0.1.0",
+    "dispatch_drops": 0,
+    "dispatched_frames": 1000000,
+    "effective_config": {
+      "anomaly_detection": false,
+      "anomaly_settings": {
+        "enabled": false,
+        "port_scan": {
+          "cooldown_secs": 30.0,
+          "enabled": true,
+          "unique_hosts_threshold": 10,
+          "unique_ports_threshold": 25,
+          "window_secs": 10.0
+        },
+        "syn_flood": {
+          "cooldown_secs": 10.0,
+          "enabled": true,
+          "syn_threshold": 200,
+          "unique_src_threshold": 50,
+          "window_secs": 5.0
+        }
+      },
+      "capture": {
+        "buffer_size_mb": 8,
+        "filter": "ip and tcp dst port 443 and dst host 203.0.113.1",
+        "immediate_mode": false,
+        "link_type": "Ethernet",
+        "promiscuous": false,
+        "snaplen": 65535,
+        "timeout_ms": 20
+      },
+      "flow_timeout_secs": 0.0,
+      "max_flows": 0,
+      "out_of_order_tracking": false,
+      "output": {
+        "alerts_jsonl": null,
+        "expired_flows_csv": null,
+        "expired_flows_jsonl": null,
+        "export_csv": null,
+        "export_json": null,
+        "hex_dump": false,
+        "quiet": true,
+        "summary_json": "/bench/intermediate-matrix/runs/rate-150000-r03/summary.json",
+        "write_pcap": "/bench/intermediate-matrix/runs/rate-150000-r03/captured.pcap",
+        "write_pcap_max_files": 0,
+        "write_pcap_rotate_mb": 0
+      },
+      "packet_limit": 1000000,
+      "pipeline_channel_capacity": 8192,
+      "pipeline_enabled": true,
+      "requested_workers": 2,
+      "retransmission_tracking": false,
+      "rtt_tracking": false,
+      "stats": {
+        "enabled": false,
+        "interval_ms": 1000,
+        "top_flows": 0
+      },
+      "web": {
+        "allowed_origins": [],
+        "auth_enabled": false,
+        "bind": "127.0.0.1",
+        "enabled": false,
+        "packet_buffer": 2000,
+        "payload_bytes": 256,
+        "port": 8080,
+        "sample_rate": 1,
+        "tick_ms": 1000,
+        "tls_enabled": false,
+        "top_n": 10
+      }
+    },
+    "elapsed_wall_seconds": 6.684607533,
+    "flows_created": 1,
+    "flows_evicted": 0,
+    "flows_expired": 0,
+    "frames_read": 1000000,
+    "input_wire_bytes": 54000000,
+    "interface_drops": 0,
+    "kernel_drops": 0,
+    "malformed_or_unsupported_packets": 0,
+    "mode": "pipeline",
+    "output_errors": [],
+    "packet_parse_errors": 0,
+    "packets_parsed": 1000000,
+    "packets_with_network_header": 1000000,
+    "packets_with_transport_header": 1000000,
+    "run_error": null,
+    "schema_version": 1,
+    "source": "interface:veth-ns-rx",
+    "status": "success",
+    "transport_parse_errors": 0,
+    "unsupported_packets": 0,
+    "worker_count": 2,
+    "worker_failures": 0,
+    "worker_processed_frames": 1000000
+  },
+  "packet_count": 1000000,
+  "process_elapsed_wall_seconds": 6.709275104000028,
+  "raw_artifacts": {
+    "captured_pcap": "captured.pcap",
+    "config": "config.toml",
+    "interface_after": "interface-after.json",
+    "interface_before": "interface-before.json",
+    "netscope_stdout": "netscope.stdout.log",
+    "netscope_time": "netscope.time.txt",
+    "summary_json": "summary.json",
+    "tcpreplay_output": "tcpreplay.stdout.log"
+  },
+  "readiness": {
+    "capture_buffer_size_mb_requested": 8,
+    "channel_capacity": 8192,
+    "event": "netscope.capture.ready",
+    "filter": "ip and tcp dst port 443 and dst host 203.0.113.1",
+    "immediate_mode": false,
+    "interface": "veth-ns-rx",
+    "pipeline_enabled": true,
+    "promiscuous": false,
+    "requested_workers": 2,
+    "schema_version": 1,
+    "snaplen": 65535,
+    "timeout_ms": 20,
+    "workers": 2
+  },
+  "repetition": 3,
+  "replay_elapsed_wall_seconds": 6.705132724000009,
+  "requested_rate_qualified": true,
+  "resource_measurements": {
+    "peak_rss_bytes": 49987584,
+    "raw": "\tCommand being timed: \"/bench/target/release/netscope --config /bench/intermediate-matrix/runs/rate-150000-r03/config.toml --interface veth-ns-rx --filter ip and tcp dst port 443 and dst host 203.0.113.1 --pipeline --workers 2 --quiet --count 1000000 --summary-json /bench/intermediate-matrix/runs/rate-150000-r03/summary.json --write-pcap /bench/intermediate-matrix/runs/rate-150000-r03/captured.pcap\"\n\tUser time (seconds): 0.37\n\tSystem time (seconds): 0.63\n\tPercent of CPU this job got: 15%\n\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:06.68\n\tAverage shared text size (kbytes): 0\n\tAverage unshared data size (kbytes): 0\n\tAverage stack size (kbytes): 0\n\tAverage total size (kbytes): 0\n\tMaximum resident set size (kbytes): 48816\n\tAverage resident set size (kbytes): 0\n\tMajor (requiring I/O) page faults: 0\n\tMinor (reclaiming a frame) page faults: 3069\n\tVoluntary context switches: 24734\n\tInvoluntary context switches: 326\n\tSwaps: 0\n\tFile system inputs: 0\n\tFile system outputs: 136744\n\tSocket messages sent: 0\n\tSocket messages received: 0\n\tSignals delivered: 0\n\tPage size (bytes): 4096\n\tExit status: 0\n",
+    "system_cpu_seconds": 0.63,
+    "user_cpu_seconds": 0.37,
+    "wall_seconds_reported_by_time": 6.68
+  },
+  "run_id": "rate-150000-r03",
+  "schema_version": 1,
+  "started_at_utc": "2026-11-08T04:08:40Z",
+  "target_rate_pps": 150000,
+  "tcpreplay": {
+    "failed_packets": 0,
+    "packet_count_source": "Successful packets",
+    "reported_packet_count": 1000000,
+    "reported_packets_per_second": 150000.08
+  },
+  "tcpreplay_exit_code": 0,
+  "trace_path": "/bench/intermediate-matrix/workload/steady-flow-5000000.pcap",
+  "trace_sha256": "1743c658cfc03a041512f1e928c10fc20bf069918a6b8b967d622a552850f7d4"
+}

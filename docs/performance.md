@@ -1,6 +1,6 @@
 # Performance
 
-This page documents NetScope's offline benchmark system and summarizes optimization measurements. Raw benchmark artifacts are excluded from version control; the older published bundles were removed. Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
+This page documents NetScope's offline benchmark system, optimization measurements, and Linux live-loss measurements. Raw offline benchmark artifacts are excluded from version control; the older published bundles were removed. The live report retains compact run evidence, with large PCAPs kept locally. Criterion measurements remain useful for isolated parser, flow, and routing regressions, but they do not represent PCAP replay throughput.
 
 - [Historical results](#results)
 - [Recreating workloads](#recreating-workloads)
@@ -158,7 +158,11 @@ Create the isolated pair. The runner builds the release binary with `cargo build
 ```bash
 sudo -v
 sudo scripts/perf/live-veth.sh up
+sudo sysctl -w net.ipv4.conf.veth-ns-rx.forwarding=0
+test "$(cat /proc/sys/net/ipv4/conf/veth-ns-rx/forwarding)" = 0
 ```
+
+Disable IPv4 forwarding on the receiver in the same network namespace before replay, and proceed only if the check succeeds. A veth pair without addresses can still forward received traffic through an existing route. Save this setting and before/after counters for all interfaces to verify that the workload stays within the pair. The [container rerun recipe](benchmarks/live-capture/linux-orbstack-2026-11-07/README.md) disables namespace-wide IPv4 forwarding at container creation.
 
 Run the default matrix (at least five seconds of offered traffic per rate, five rates, three repetitions; one million packets is the per-run minimum):
 
@@ -182,7 +186,7 @@ The tested requested rates form a bracket, not an exact maximum. The report name
 
 The veth runner is Linux-only. macOS does not provide an equivalent isolated sender/receiver pair through `lo0`; do not use loopback replay to make a loss claim. A manual macOS trial is appropriate only with a second host connected over a dedicated, otherwise unused point-to-point link. Start NetScope on the receiver and wait for `NETSCOPE_READY` before starting finite `tcpreplay` on the sender. Save both command outputs, the NetScope summary, interface-counter readings, and the trace hash. Report unavailable drop counters as unavailable; the Linux runner's automated rate bracketing does not apply to that manual setup.
 
-Controlled Linux live measurements are excluded from the current release scope. The checked-in [live-capture report](benchmarks/live-capture/report.md) records no measured live rate or loss number. Run the procedure above on Linux before publishing such results.
+The November 7, 2026 [Linux live-capture report](benchmarks/live-capture/report.md) publishes 30 trials on an Apple M4 using a veth pair in OrbStack's Linux VM. The final snapshot also shows 72,001,692 packets transmitted on the container's `eth0`, consistent with forwarding the workload beyond the pair; these runs do not establish isolated-veth performance. All 72 million sent packets were captured; workers processed 71,999,108 frames, with 892 dispatch drops in one qualified 300,000 packets/s trial. All three 400,000 packets/s trials qualified with zero observed loss, but the non-monotonic results establish no single loss threshold. Targets of 500,000–1,000,000 packets/s were sender-limited. The report includes every achieved rate, counter, CPU/RSS reading, environment, and compact raw run evidence; its findings apply to that virtualized, single-flow, PCAP-recording configuration with additional network work. The corrected procedure has not been used to rerun either matrix.
 
 ## Tuning
 

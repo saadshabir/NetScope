@@ -1,0 +1,91 @@
+ Downloading crates ...
+  Downloaded anes v0.1.6
+  Downloaded ciborium v0.2.2
+  Downloaded ciborium-ll v0.2.2
+  Downloaded cast v0.3.0
+  Downloaded plotters-backend v0.3.7
+  Downloaded is-terminal v0.4.17
+  Downloaded plotters-svg v0.3.7
+  Downloaded tinytemplate v1.2.1
+  Downloaded oorandom v11.1.5
+  Downloaded ciborium-io v0.2.2
+  Downloaded crossbeam-deque v0.8.6
+  Downloaded criterion-plot v0.5.0
+  Downloaded num-traits v0.2.19
+  Downloaded half v2.7.1
+  Downloaded crossbeam-epoch v0.9.20
+  Downloaded rayon-core v1.13.0
+  Downloaded plotters v0.3.7
+  Downloaded itertools v0.10.5
+  Downloaded criterion v0.5.1
+  Downloaded rayon v1.11.0
+   Compiling zerocopy v0.8.39
+   Compiling serde v1.0.228
+   Compiling zerocopy-derive v0.8.39
+   Compiling crossbeam-utils v0.8.21
+   Compiling either v1.15.0
+   Compiling futures-macro v0.3.32
+   Compiling crossbeam-epoch v0.9.20
+   Compiling num-traits v0.2.19
+   Compiling rayon-core v1.13.0
+   Compiling plotters-backend v0.3.7
+   Compiling regex-syntax v0.8.9
+   Compiling ciborium-io v0.2.2
+   Compiling plotters-svg v0.3.7
+   Compiling itertools v0.10.5
+   Compiling axum-server v0.8.0
+   Compiling cast v0.3.0
+   Compiling is-terminal v0.4.17
+   Compiling anes v0.1.6
+   Compiling oorandom v11.1.5
+   Compiling crossbeam-channel v0.5.15
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling crossbeam-deque v0.8.6
+   Compiling futures-util v0.3.32
+   Compiling serde_urlencoded v0.7.1
+   Compiling toml_edit v0.22.27
+   Compiling plotters v0.3.7
+   Compiling tinytemplate v1.2.1
+   Compiling regex-automata v0.4.14
+   Compiling criterion-plot v0.5.0
+   Compiling rayon v1.11.0
+   Compiling tower v0.5.3
+   Compiling toml v0.8.23
+   Compiling regex v1.12.3
+   Compiling ppv-lite86 v0.2.21
+   Compiling half v2.7.1
+   Compiling rand_chacha v0.9.0
+   Compiling ciborium-ll v0.2.2
+   Compiling rand v0.9.4
+   Compiling ahash v0.8.12
+   Compiling ciborium v0.2.2
+   Compiling tungstenite v0.28.0
+   Compiling criterion v0.5.1
+   Compiling tokio-tungstenite v0.28.0
+   Compiling axum v0.8.8
+   Compiling netscope v0.1.0 (/source)
+    Finished `release` profile [optimized] target(s) in 17.37s
+     Running tests/live_shutdown.rs (/bench/target/release/deps/live_shutdown-e2aee315965d0c78)
+
+running 1 test
+
+Interrupt received, stopping capture...
+
+Interrupt received, stopping capture...
+
+Interrupt received, stopping capture...
+
+Interrupt received, stopping capture...
+
+Interrupt received, stopping capture...
+
+Interrupt received, stopping capture...
+
+Interrupt received, stopping capture...
+
+Interrupt received, stopping capture...
+test idle_live_capture_interrupt_flushes_outputs_in_both_modes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.77s
+

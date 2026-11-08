@@ -1,0 +1,216 @@
+{
+  "/sys/fs/cgroup/cpu.max": "max 100000\n",
+  "/sys/fs/cgroup/cpuset.cpus.effective": "0-9\n",
+  "/sys/fs/cgroup/memory.max": "max\n",
+  "/sys/fs/cgroup/cpu.stat": "usage_usec 606310638\nuser_usec 288303575\nsystem_usec 318007062\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0\n",
+  "/proc/loadavg": "1.62 1.67 0.84 1/373 4625\n",
+  "interfaces": [
+    {
+      "ifindex": 1,
+      "ifname": "lo",
+      "flags": [
+        "LOOPBACK",
+        "UP",
+        "LOWER_UP"
+      ],
+      "mtu": 65536,
+      "qdisc": "noqueue",
+      "operstate": "UNKNOWN",
+      "linkmode": "DEFAULT",
+      "group": "default",
+      "txqlen": 1000,
+      "link_type": "loopback",
+      "address": "00:00:00:00:00:00",
+      "broadcast": "00:00:00:00:00:00",
+      "promiscuity": 0,
+      "allmulti": 0,
+      "min_mtu": 0,
+      "max_mtu": 0,
+      "inet6_addr_gen_mode": "eui64",
+      "num_tx_queues": 1,
+      "num_rx_queues": 1,
+      "gso_max_size": 65536,
+      "gso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "tso_max_segs": 65535,
+      "gro_max_size": 65536,
+      "stats64": {
+        "rx": {
+          "bytes": 0,
+          "packets": 0,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0
+        },
+        "tx": {
+          "bytes": 0,
+          "packets": 0,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0
+        }
+      }
+    },
+    {
+      "ifindex": 2,
+      "link_index": 15,
+      "ifname": "eth0",
+      "flags": [
+        "BROADCAST",
+        "MULTICAST",
+        "UP",
+        "LOWER_UP"
+      ],
+      "mtu": 1500,
+      "qdisc": "noqueue",
+      "operstate": "UP",
+      "linkmode": "DEFAULT",
+      "group": "default",
+      "link_type": "ether",
+      "address": "be:48:ae:c1:0e:55",
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "link_netnsid": 0,
+      "promiscuity": 0,
+      "allmulti": 0,
+      "min_mtu": 68,
+      "max_mtu": 65535,
+      "linkinfo": {
+        "info_kind": "veth"
+      },
+      "inet6_addr_gen_mode": "eui64",
+      "num_tx_queues": 10,
+      "num_rx_queues": 10,
+      "gso_max_size": 65536,
+      "gso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "tso_max_segs": 65535,
+      "gro_max_size": 65536,
+      "stats64": {
+        "rx": {
+          "bytes": 48204184,
+          "packets": 1874,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0
+        },
+        "tx": {
+          "bytes": 3888151728,
+          "packets": 72001692,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0
+        }
+      }
+    },
+    {
+      "ifindex": 3,
+      "link": "veth-ns-tx",
+      "ifname": "veth-ns-rx",
+      "flags": [
+        "BROADCAST",
+        "MULTICAST",
+        "UP",
+        "LOWER_UP"
+      ],
+      "mtu": 1500,
+      "qdisc": "noqueue",
+      "operstate": "UP",
+      "linkmode": "DEFAULT",
+      "group": "default",
+      "txqlen": 1000,
+      "link_type": "ether",
+      "address": "02:00:00:00:00:01",
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "promiscuity": 0,
+      "allmulti": 0,
+      "min_mtu": 68,
+      "max_mtu": 65535,
+      "linkinfo": {
+        "info_kind": "veth"
+      },
+      "inet6_addr_gen_mode": "eui64",
+      "num_tx_queues": 10,
+      "num_rx_queues": 10,
+      "gso_max_size": 65536,
+      "gso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "tso_max_segs": 65535,
+      "gro_max_size": 65536,
+      "stats64": {
+        "rx": {
+          "bytes": 3888000936,
+          "packets": 72000012,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0
+        },
+        "tx": {
+          "bytes": 936,
+          "packets": 12,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0
+        }
+      }
+    },
+    {
+      "ifindex": 4,
+      "link": "veth-ns-rx",
+      "ifname": "veth-ns-tx",
+      "flags": [
+        "BROADCAST",
+        "MULTICAST",
+        "UP",
+        "LOWER_UP"
+      ],
+      "mtu": 1500,
+      "qdisc": "noqueue",
+      "operstate": "UP",
+      "linkmode": "DEFAULT",
+      "group": "default",
+      "txqlen": 1000,
+      "link_type": "ether",
+      "address": "02:00:00:00:00:02",
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "promiscuity": 0,
+      "allmulti": 0,
+      "min_mtu": 68,
+      "max_mtu": 65535,
+      "linkinfo": {
+        "info_kind": "veth"
+      },
+      "inet6_addr_gen_mode": "eui64",
+      "num_tx_queues": 10,
+      "num_rx_queues": 10,
+      "gso_max_size": 65536,
+      "gso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "tso_max_segs": 65535,
+      "gro_max_size": 65536,
+      "stats64": {
+        "rx": {
+          "bytes": 936,
+          "packets": 12,
+          "errors": 0,
+          "dropped": 0,
+          "over_errors": 0,
+          "multicast": 0
+        },
+        "tx": {
+          "bytes": 3888000936,
+          "packets": 72000012,
+          "errors": 0,
+          "dropped": 0,
+          "carrier_errors": 0,
+          "collisions": 0
+        }
+      }
+    }
+  ]
+}
