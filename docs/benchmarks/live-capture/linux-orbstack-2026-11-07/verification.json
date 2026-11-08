@@ -1,0 +1,46 @@
+{
+  "checks": [
+    "Both suites complete; all requested rate/repetition pairs present exactly once",
+    "Clean source, unchanged source and binary, matching provenance across suites",
+    "Every saved run record matches its suite entry and separate summary JSON",
+    "Trace and all captured PCAP sizes and SHA-256 hashes verified after export",
+    "Replay and capture counts, sequence IDs, worker processing plus dispatch drops reconcile",
+    "Raw tcpreplay and GNU time logs match parsed measurements; classifications rechecked",
+    "CPU user/system, wall time, and peak RSS readings present for all runs"
+  ],
+  "limitations": [
+    "Network isolation was not established: runtime-after.json shows 72,001,692 packets transmitted through eth0, consistent with forwarding the workload outside the veth pair.",
+    "The original IPv4 forwarding setting was not recorded. The corrected rerun procedure disables forwarding, but no published matrix has been rerun with that correction."
+  ],
+  "suites": {
+    "default-matrix": {
+      "runs": 15,
+      "packets_sent": 40500000,
+      "frames_captured": 40500000,
+      "frames_processed": 40500000,
+      "kernel_drops": 0,
+      "dispatch_drops": 0,
+      "classifications": {
+        "zero_observed_loss": 5,
+        "inconclusive": 10
+      },
+      "trace_sha256": "1743c658cfc03a041512f1e928c10fc20bf069918a6b8b967d622a552850f7d4",
+      "binary_sha256": "71a30d6e157c10b03ed918d2882df08fceb8dbd6968695b8f1d41b245506933f"
+    },
+    "intermediate-matrix": {
+      "runs": 15,
+      "packets_sent": 31500000,
+      "frames_captured": 31500000,
+      "frames_processed": 31499108,
+      "kernel_drops": 0,
+      "dispatch_drops": 892,
+      "classifications": {
+        "zero_observed_loss": 10,
+        "loss_observed": 1,
+        "inconclusive": 4
+      },
+      "trace_sha256": "1743c658cfc03a041512f1e928c10fc20bf069918a6b8b967d622a552850f7d4",
+      "binary_sha256": "71a30d6e157c10b03ed918d2882df08fceb8dbd6968695b8f1d41b245506933f"
+    }
+  }
+}

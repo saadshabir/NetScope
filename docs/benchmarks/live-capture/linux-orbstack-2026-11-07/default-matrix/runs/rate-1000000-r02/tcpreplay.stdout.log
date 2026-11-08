@@ -1,0 +1,36 @@
+Test start: 2026-11-08 04:07:25.459712 ...
+Actual: 435424 packets (23512896 bytes) sent in 1.00 seconds
+Rated: 23512566.8 Bps, 188.10 Mbps, 435417.90 pps
+Actual: 864114 packets (46662156 bytes) sent in 2.00 seconds
+Rated: 23330914.6 Bps, 186.64 Mbps, 432053.97 pps
+Actual: 1296098 packets (69989292 bytes) sent in 3.00 seconds
+Rated: 23329631.7 Bps, 186.63 Mbps, 432030.21 pps
+Actual: 1711164 packets (92402856 bytes) sent in 4.00 seconds
+Rated: 23100610.0 Bps, 184.80 Mbps, 427789.07 pps
+Actual: 2139750 packets (115546500 bytes) sent in 5.00 seconds
+Rated: 23109207.5 Bps, 184.87 Mbps, 427948.28 pps
+Actual: 2565106 packets (138515724 bytes) sent in 6.00 seconds
+Rated: 23085873.1 Bps, 184.68 Mbps, 427516.17 pps
+Actual: 2990836 packets (161505144 bytes) sent in 7.00 seconds
+Rated: 23072094.2 Bps, 184.57 Mbps, 427261.00 pps
+Actual: 3396574 packets (183414996 bytes) sent in 8.00 seconds
+Rated: 22926805.7 Bps, 183.41 Mbps, 424570.47 pps
+Actual: 3664846 packets (197901684 bytes) sent in 9.00 seconds
+Rated: 21989014.9 Bps, 175.91 Mbps, 407203.97 pps
+Actual: 3828666 packets (206747964 bytes) sent in 10.00 seconds
+Rated: 20674713.7 Bps, 165.39 Mbps, 382865.06 pps
+Actual: 4000244 packets (216013176 bytes) sent in 11.00 seconds
+Rated: 19637481.1 Bps, 157.09 Mbps, 363657.05 pps
+Actual: 4341918 packets (234463572 bytes) sent in 12.00 seconds
+Rated: 19538552.8 Bps, 156.30 Mbps, 361825.05 pps
+Actual: 4756704 packets (256862016 bytes) sent in 13.00 seconds
+Rated: 19758542.1 Bps, 158.06 Mbps, 365898.92 pps
+Test complete: 2026-11-08 04:07:39.060395
+Actual: 5000000 packets (270000000 bytes) sent in 13.60 seconds
+Rated: 19851944.2 Bps, 158.81 Mbps, 367628.59 pps
+Statistics for network device: veth-ns-tx
+	Successful packets:        5000000
+	Failed packets:            0
+	Truncated packets:         0
+	Retried packets (ENOBUFS): 0
+	Retried packets (EAGAIN):  0

@@ -1,0 +1,162 @@
+{
+  "capture": {
+    "address": "02:00:00:00:00:01",
+    "available": true,
+    "flags": [
+      "BROADCAST",
+      "MULTICAST",
+      "UP",
+      "LOWER_UP"
+    ],
+    "ifindex": 3,
+    "iflink": 4,
+    "interface": "veth-ns-rx",
+    "kind": "veth",
+    "operstate": "UP",
+    "raw": {
+      "address": "02:00:00:00:00:01",
+      "allmulti": 0,
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "flags": [
+        "BROADCAST",
+        "MULTICAST",
+        "UP",
+        "LOWER_UP"
+      ],
+      "gro_max_size": 65536,
+      "group": "default",
+      "gso_max_segs": 65535,
+      "gso_max_size": 65536,
+      "ifindex": 3,
+      "ifname": "veth-ns-rx",
+      "inet6_addr_gen_mode": "eui64",
+      "link": "veth-ns-tx",
+      "link_type": "ether",
+      "linkinfo": {
+        "info_kind": "veth"
+      },
+      "linkmode": "DEFAULT",
+      "max_mtu": 65535,
+      "min_mtu": 68,
+      "mtu": 1500,
+      "num_rx_queues": 10,
+      "num_tx_queues": 10,
+      "operstate": "UP",
+      "promiscuity": 0,
+      "qdisc": "noqueue",
+      "stats64": {
+        "rx": {
+          "bytes": 1647000866,
+          "dropped": 0,
+          "errors": 0,
+          "multicast": 0,
+          "over_errors": 0,
+          "packets": 30500011
+        },
+        "tx": {
+          "bytes": 866,
+          "carrier_errors": 0,
+          "collisions": 0,
+          "dropped": 0,
+          "errors": 0,
+          "packets": 11
+        }
+      },
+      "tso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "txqlen": 1000
+    },
+    "rx": {
+      "bytes": 1647000866,
+      "dropped": 0,
+      "errors": 0,
+      "packets": 30500011
+    },
+    "tx": {
+      "bytes": 866,
+      "dropped": 0,
+      "errors": 0,
+      "packets": 11
+    }
+  },
+  "sender": {
+    "address": "02:00:00:00:00:02",
+    "available": true,
+    "flags": [
+      "BROADCAST",
+      "MULTICAST",
+      "UP",
+      "LOWER_UP"
+    ],
+    "ifindex": 4,
+    "iflink": 3,
+    "interface": "veth-ns-tx",
+    "kind": "veth",
+    "operstate": "UP",
+    "raw": {
+      "address": "02:00:00:00:00:02",
+      "allmulti": 0,
+      "broadcast": "ff:ff:ff:ff:ff:ff",
+      "flags": [
+        "BROADCAST",
+        "MULTICAST",
+        "UP",
+        "LOWER_UP"
+      ],
+      "gro_max_size": 65536,
+      "group": "default",
+      "gso_max_segs": 65535,
+      "gso_max_size": 65536,
+      "ifindex": 4,
+      "ifname": "veth-ns-tx",
+      "inet6_addr_gen_mode": "eui64",
+      "link": "veth-ns-rx",
+      "link_type": "ether",
+      "linkinfo": {
+        "info_kind": "veth"
+      },
+      "linkmode": "DEFAULT",
+      "max_mtu": 65535,
+      "min_mtu": 68,
+      "mtu": 1500,
+      "num_rx_queues": 10,
+      "num_tx_queues": 10,
+      "operstate": "UP",
+      "promiscuity": 0,
+      "qdisc": "noqueue",
+      "stats64": {
+        "rx": {
+          "bytes": 866,
+          "dropped": 0,
+          "errors": 0,
+          "multicast": 0,
+          "over_errors": 0,
+          "packets": 11
+        },
+        "tx": {
+          "bytes": 1647000866,
+          "carrier_errors": 0,
+          "collisions": 0,
+          "dropped": 0,
+          "errors": 0,
+          "packets": 30500011
+        }
+      },
+      "tso_max_segs": 65535,
+      "tso_max_size": 524280,
+      "txqlen": 1000
+    },
+    "rx": {
+      "bytes": 866,
+      "dropped": 0,
+      "errors": 0,
+      "packets": 11
+    },
+    "tx": {
+      "bytes": 1647000866,
+      "dropped": 0,
+      "errors": 0,
+      "packets": 30500011
+    }
+  }
+}

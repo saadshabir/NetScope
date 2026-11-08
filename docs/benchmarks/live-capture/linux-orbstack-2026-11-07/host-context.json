@@ -1,0 +1,26 @@
+{
+  "measurement_date_local": "2026-11-07",
+  "measurement_timezone": "America/Toronto",
+  "host_cpu": "Apple M4",
+  "host_memory_bytes": 17179869184,
+  "host_os": "macOS 27.2.0 (Darwin 27.2.0 arm64)",
+  "virtualization": "OrbStack, Docker 29.8.2, Linux aarch64",
+  "guest_logical_cpus": 10,
+  "guest_memory_bytes": 8392671232,
+  "base_image": "rust:1.93.1-bookworm@sha256:7c4ae649a84014c467d79319bbf17ce2632ae8b8be123ac2fb2ea5be46823f31",
+  "benchmark_image_id": "sha256:2f9dfaa45a14b4c633ca643ed3bdf687cbd98cc31914169ad1fc842482abbecf",
+  "container_capabilities_added": ["NET_ADMIN", "NET_RAW"],
+  "network_isolation_review": {
+    "status": "not established",
+    "original_ipv4_forwarding_setting": "not recorded",
+    "final_eth0_tx_packets": 72001692,
+    "final_eth0_tx_bytes": 3888151728,
+    "interpretation": "The final eth0 transmit counts are consistent with forwarding the synthetic workload outside the veth pair; achieved rates and resource measurements include the effects of additional network work.",
+    "corrected_rerun": "README.md now disables IPv4 forwarding at container creation and checks receiver forwarding before replay; neither published matrix has been rerun with that correction."
+  },
+  "source_mount": "read-only /source from the NetScope checkout",
+  "measurement_storage": "Container overlay filesystem at /bench, not the macOS bind mount",
+  "background_services": "OrbStack Kubernetes CoreDNS and local-path provisioner (plus their pause containers) were running; the desktop host was shared and not reserved for benchmarking.",
+  "primary_plan": "Unmodified harness defaults: 100000,250000,500000,750000,1000000 pps, three repetitions each, five-second minimum, one-million-packet minimum.",
+  "supplemental_plan": "150000,200000,300000,400000,1000000 pps, three repetitions each, otherwise the same settings. Selected after the primary matrix showed sender-rate shortfalls above 250000 pps. Keeping 1000000 in the second matrix regenerates the identical five-million-packet trace. No original repetitions are discarded."
+}

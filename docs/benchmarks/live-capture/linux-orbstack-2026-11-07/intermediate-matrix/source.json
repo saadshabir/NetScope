@@ -1,0 +1,15 @@
+{
+  "commit": "e938017a7d86dc942e5cedf80975191b458bfd4a",
+  "dirty": false,
+  "fingerprint_method": "commit + binary diff from HEAD + SHA-256 of each untracked regular file",
+  "snapshot": {
+    "complete": true,
+    "patch_path": "source-snapshot/working-tree.patch",
+    "reconstruction_guide": "source-snapshot/README.md",
+    "untracked_root": "source-snapshot/untracked"
+  },
+  "source_tree_sha256": "0b0cdc19a3c60ce1981dc786cf03ab8a454484abac096638329f41f369ba4098",
+  "status_porcelain": [],
+  "tracked_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "untracked_files": []
+}

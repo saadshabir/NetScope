@@ -22,7 +22,7 @@ Live capture requires permission to read the interface, usually `sudo` or Linux 
 - [Quickstart](docs/quickstart.md): build, first PCAP, live permissions, and troubleshooting.
 - [Reference](docs/reference.md): config precedence, output retention, summary semantics, and dashboard endpoints.
 - [Design](docs/design.md): parsing scope, flows, anomalies, pipeline, and dashboard boundaries.
-- [Performance](docs/performance.md): reproducible offline measurements and the Linux live-loss procedure.
+- [Performance](docs/performance.md): reproducible offline measurements, measured Linux live-loss matrices, and reproduction procedures.
 - [Tool comparison](docs/comparison.md): commands against the same sample PCAP and tool-selection guidance.
 - [Changelog](CHANGELOG.md): release history and cleanup record.
 
