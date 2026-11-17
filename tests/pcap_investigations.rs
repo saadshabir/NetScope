@@ -196,6 +196,10 @@ fn assert_accounting(name: &str, run: &RunOutput, pipeline: bool) {
         run.summary["alerts_emitted"].as_u64(),
         Some(run.alerts.len() as u64)
     );
+    assert_eq!(
+        run.summary["anomaly_saturation"],
+        serde_json::to_value(netscope::analysis::anomaly::AnomalySaturation::default()).unwrap()
+    );
 
     if pipeline {
         let frames_read = run.summary["frames_read"].as_u64().unwrap();
@@ -220,6 +224,70 @@ fn assert_accounting(name: &str, run: &RunOutput, pipeline: bool) {
         assert!(run.summary["dispatched_frames"].is_null());
         assert!(run.summary["dispatch_drops"].is_null());
     }
+}
+
+#[test]
+fn run_summary_reports_anomaly_evidence_discards() {
+    let temp_dir = TempRunDir::new("anomaly-saturation");
+    let pcap_path = temp_dir.file("saturation.pcap");
+    let config_path = temp_dir.file("config.toml");
+    let summary_path = temp_dir.file("summary.json");
+
+    let mut fixture = pcap::Capture::from_file(fixture_path("port-scan.pcap")).unwrap();
+    let mut capture = fixture.savefile(&pcap_path).unwrap();
+    let packet = fixture.next_packet().unwrap();
+    let mut frame = packet.data.to_vec();
+    for port in 1..=4099u16 {
+        // Vary the TCP destination port on the fixture's Ethernet + IPv4 SYN.
+        frame[36..38].copy_from_slice(&port.to_be_bytes());
+        capture.write(&pcap::Packet::new(packet.header, &frame));
+    }
+    capture.flush().unwrap();
+    drop(capture);
+
+    std::fs::write(
+        &config_path,
+        "[analysis.anomalies.port_scan]\nunique_ports_threshold = 4097\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_netscope"))
+        .arg("--read-pcap")
+        .arg(&pcap_path)
+        .arg("--config")
+        .arg(&config_path)
+        .arg("--summary-json")
+        .arg(&summary_path)
+        .args(["--anomalies", "--quiet"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout)
+            .contains("Anomaly evidence discards: 3 SYN flood, 3 port scan")
+    );
+    let summary: Value = serde_json::from_slice(&std::fs::read(summary_path).unwrap()).unwrap();
+    assert_eq!(summary["alerts_emitted"], 0);
+    assert_eq!(
+        summary["anomaly_saturation"],
+        serde_json::json!({
+            "syn_flood": {
+                "key_limit_rejections": 3,
+                "cooldown_key_limit_rejections": 0,
+                "record_limit_rejections": 0,
+                "per_key_record_evictions": 0,
+            },
+            "port_scan": {
+                "key_limit_rejections": 0,
+                "cooldown_key_limit_rejections": 0,
+                "record_limit_rejections": 0,
+                "per_key_record_evictions": 3,
+            },
+        })
+    );
 }
 
 fn flow_facts(flows: &[Value]) -> Vec<String> {

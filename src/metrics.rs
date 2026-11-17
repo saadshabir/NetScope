@@ -1,9 +1,11 @@
 //! Prometheus-compatible metrics exposed by the web server.
 
 use std::fmt::Write as _;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
+
+use crate::analysis::anomaly::{AlertKind, AnomalySaturation};
 
 const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
@@ -15,6 +17,7 @@ struct MetricsState {
     dispatch_drops_total: AtomicU64,
     kernel_drops_total: AtomicU64,
     kernel_if_drops_total: AtomicU64,
+    anomaly_saturation: Mutex<AnomalySaturation>,
 }
 
 impl MetricsState {
@@ -27,6 +30,7 @@ impl MetricsState {
             dispatch_drops_total: AtomicU64::new(0),
             kernel_drops_total: AtomicU64::new(0),
             kernel_if_drops_total: AtomicU64::new(0),
+            anomaly_saturation: Mutex::default(),
         }
     }
 }
@@ -73,6 +77,14 @@ pub fn observe_tick(
     state.active_flows.store(active_flows, Ordering::Relaxed);
 }
 
+/// Publish the inline detector's cumulative counters.
+pub fn set_anomaly_saturation(saturation: AnomalySaturation) {
+    *metrics()
+        .anomaly_saturation
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = saturation;
+}
+
 /// Content type for Prometheus text exposition format.
 pub fn prometheus_content_type() -> &'static str {
     PROMETHEUS_CONTENT_TYPE
@@ -88,6 +100,10 @@ pub fn render_prometheus_text() -> String {
     let dispatch_drops_total = state.dispatch_drops_total.load(Ordering::Relaxed);
     let kernel_drops_total = state.kernel_drops_total.load(Ordering::Relaxed);
     let kernel_if_drops_total = state.kernel_if_drops_total.load(Ordering::Relaxed);
+    let anomaly_saturation = *state
+        .anomaly_saturation
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let uptime_seconds = state.started_at.elapsed().as_secs_f64();
 
     let mut out = String::with_capacity(1024);
@@ -161,6 +177,27 @@ pub fn render_prometheus_text() -> String {
         kernel_if_drops_total
     );
 
+    let _ = writeln!(
+        out,
+        "# HELP netscope_anomaly_evidence_discards_total Evidence rejections and record evictions caused by detector limits."
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE netscope_anomaly_evidence_discards_total counter"
+    );
+    for (detector, saturation) in [
+        (AlertKind::SynFlood, anomaly_saturation.syn_flood),
+        (AlertKind::PortScan, anomaly_saturation.port_scan),
+    ] {
+        for (reason, count) in saturation.counts() {
+            let _ = writeln!(
+                out,
+                "netscope_anomaly_evidence_discards_total{{detector=\"{}\",reason=\"{reason}\"}} {count}",
+                detector.as_str()
+            );
+        }
+    }
+
     out
 }
 
@@ -173,11 +210,21 @@ fn escape_label_value(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{observe_tick, render_prometheus_text};
+    use super::{observe_tick, render_prometheus_text, set_anomaly_saturation};
+    use crate::analysis::anomaly::{AnomalySaturation, DetectorSaturation};
 
     #[test]
     fn render_contains_expected_metric_families() {
         observe_tick(10, 5, 3, 1, 2, 4);
+        let saturation = AnomalySaturation {
+            syn_flood: DetectorSaturation {
+                key_limit_rejections: 17,
+                ..DetectorSaturation::default()
+            },
+            ..AnomalySaturation::default()
+        };
+        set_anomaly_saturation(saturation);
+        set_anomaly_saturation(saturation);
 
         let body = render_prometheus_text();
 
@@ -189,5 +236,9 @@ mod tests {
         assert!(body.contains("netscope_dispatch_drops_total"));
         assert!(body.contains("netscope_kernel_drops_total"));
         assert!(body.contains("netscope_kernel_if_drops_total"));
+        assert!(body.lines().any(|line| line ==
+            "netscope_anomaly_evidence_discards_total{detector=\"syn_flood\",reason=\"key_limit_rejections\"} 17"));
+        assert!(body.lines().any(|line| line ==
+            "netscope_anomaly_evidence_discards_total{detector=\"port_scan\",reason=\"per_key_record_evictions\"} 0"));
     }
 }

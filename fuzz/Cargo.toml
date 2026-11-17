@@ -1,0 +1,42 @@
+[package]
+name = "netscope-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+netscope = { path = "..", default-features = false }
+
+[workspace]
+
+[[bin]]
+name = "packet_parse"
+path = "fuzz_targets/packet_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_compression"
+path = "fuzz_targets/dns_compression.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tls_lengths"
+path = "fuzz_targets/tls_lengths.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "routing_consistency"
+path = "fuzz_targets/routing_consistency.rs"
+test = false
+doc = false
+bench = false

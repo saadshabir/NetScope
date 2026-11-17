@@ -3,7 +3,7 @@
 use serde::Serialize;
 use std::path::Path;
 
-use crate::protocol::LinkType;
+use crate::{analysis::anomaly::AnomalySaturation, protocol::LinkType};
 
 pub const SUMMARY_SCHEMA_VERSION: u32 = 1;
 
@@ -27,6 +27,7 @@ pub struct RunAccounting {
     pub flows_expired: u64,
     pub flows_evicted: u64,
     pub alerts_emitted: u64,
+    pub anomaly_saturation: AnomalySaturation,
     pub kernel_drops: Option<u64>,
     pub interface_drops: Option<u64>,
     pub output_errors: Vec<String>,
@@ -67,6 +68,7 @@ pub struct RunSummary {
     pub flows_expired: u64,
     pub flows_evicted: u64,
     pub alerts_emitted: u64,
+    pub anomaly_saturation: AnomalySaturation,
     /// Live capture counters are null for offline input or when libpcap did not
     /// make the counters available.
     pub kernel_drops: Option<u64>,
@@ -193,6 +195,7 @@ impl RunSummary {
             flows_expired: accounting.flows_expired,
             flows_evicted: accounting.flows_evicted,
             alerts_emitted: accounting.alerts_emitted,
+            anomaly_saturation: accounting.anomaly_saturation,
             kernel_drops: accounting.kernel_drops,
             interface_drops: accounting.interface_drops,
             output_errors: accounting.output_errors,

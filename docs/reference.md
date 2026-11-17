@@ -70,10 +70,22 @@ Summary JSON schema version 1 includes application version, run status and error
 | `malformed_or_unsupported_packets` | Compatibility aggregate counting each affected frame once. |
 | `dispatched_frames`, `dispatch_drops`, `worker_processed_frames`, `worker_failures` | Pipeline dispatch and worker accounting; `null` in inline mode. |
 | `flows_created`, `flows_expired`, `flows_evicted`, `alerts_emitted` | Observed flow lifecycle and alert events. |
+| `anomaly_saturation` | Cumulative evidence discards by limit for `syn_flood` and `port_scan`. Disabled detectors report zeros. |
 | `kernel_drops`, `interface_drops` | Separate libpcap drop counters; `null` for offline input or when unavailable. |
 | `output_errors` | Output open, write, flush, and export failures. |
 
 After workers drain, pipeline accounting reconciles `frames_read = dispatched_frames + dispatch_drops` and `dispatched_frames = worker_processed_frames + worker_failures`. A partial decode can increment `packets_parsed` and a malformed or unsupported counter. Offline queue pressure slows reading instead of causing dispatch drops.
+
+When anomaly detection is enabled, the terminal summary reports total evidence discards for each detector. The `anomaly_saturation` fields give the breakdown.
+
+| Counter | When it increments |
+| --- | --- |
+| `key_limit_rejections` | An observation needs a new key and the active key table is full. |
+| `cooldown_key_limit_rejections` | An observation needs a new key and the cooldown table is full. |
+| `record_limit_rejections` | The detector-wide record budget blocks an observation for a new key or a new record for an existing key. Scan port and host records are admitted independently for existing keys. |
+| `per_key_record_evictions` | A full per-key window evicts its oldest record. One SYN record can hold several observations. The scan port and host windows each have their own limit. |
+
+If multiple limits block a new key, the first applicable reason is counted in the order active keys, global records, and cooldown keys. The counters increase only for storage-limit decisions. A discard can reduce alert coverage.
 
 ## Dashboard endpoints
 
@@ -83,7 +95,7 @@ Enable the server with `--web`. It lives for the duration of the capture process
 | --- | --- |
 | `/` | Embedded dashboard and static assets. |
 | `/api/health` | Plain text `ok`; confirms HTTP availability, not capture completeness or packet loss. |
-| `/metrics` | Prometheus text format with capture totals, active flows, drop totals, build version, and uptime. |
+| `/metrics` | Prometheus text format with capture totals, active flows, drop totals, anomaly evidence discards, build version, and uptime. |
 | `/ws` | WebSocket stats, sampled packets, packet-detail requests, and alerts. |
 
 While a local capture with `--web` is running, use a second terminal:
@@ -94,6 +106,8 @@ curl -fsS http://127.0.0.1:8080/metrics
 ```
 
 Capture metrics update on dashboard ticks and can lag behind packet processing. The Top Flows table displays DNS correlation statistics and visible TLS SNI in its Details column. Use the final run summary for reconciled accounting and unavailable-counter semantics. HTTP Basic auth and TLS apply to every endpoint when enabled.
+
+`netscope_anomaly_evidence_discards_total` exposes the four run-summary counters with `detector` and `reason` labels. Each reason matches the corresponding `anomaly_saturation` field name.
 
 The dashboard allows up to 32 WebSocket connections. Client messages and frames are limited to 4 KiB, with 60 requests per second per connection; clients exceeding these limits disconnect. Sends time out after five seconds. When ticks are delayed or dropped, queued dashboard samples are capped at 8,192 packets and 1,024 alerts; excess samples are omitted from the dashboard. Capture accounting and file outputs are unaffected.
 
