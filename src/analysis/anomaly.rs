@@ -46,6 +46,55 @@ pub struct AlertObservations {
     pub unique_hosts: Option<u64>,
 }
 
+/// Cumulative evidence discards caused by a detector's storage limits.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct DetectorSaturation {
+    pub key_limit_rejections: u64,
+    pub cooldown_key_limit_rejections: u64,
+    pub record_limit_rejections: u64,
+    pub per_key_record_evictions: u64,
+}
+
+impl DetectorSaturation {
+    pub(crate) fn counts(self) -> [(&'static str, u64); 4] {
+        [
+            ("key_limit_rejections", self.key_limit_rejections),
+            (
+                "cooldown_key_limit_rejections",
+                self.cooldown_key_limit_rejections,
+            ),
+            ("record_limit_rejections", self.record_limit_rejections),
+            ("per_key_record_evictions", self.per_key_record_evictions),
+        ]
+    }
+
+    pub fn total(self) -> u64 {
+        self.counts()
+            .into_iter()
+            .fold(0u64, |total, (_, count)| total.saturating_add(count))
+    }
+
+    fn reject_new_key(&mut self, keys: usize, records: usize, cooldowns: usize) -> bool {
+        let counter = if keys >= MAX_KEYS {
+            &mut self.key_limit_rejections
+        } else if records >= MAX_RECORDS {
+            &mut self.record_limit_rejections
+        } else if cooldowns >= MAX_KEYS {
+            &mut self.cooldown_key_limit_rejections
+        } else {
+            return false;
+        };
+        *counter = counter.saturating_add(1);
+        true
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct AnomalySaturation {
+    pub syn_flood: DetectorSaturation,
+    pub port_scan: DetectorSaturation,
+}
+
 #[derive(Debug)]
 pub struct AnomalyDetector {
     config: AnomalyConfig,
@@ -92,6 +141,13 @@ impl AnomalyDetector {
             latest_event_ts: None,
             last_cleanup_ts: None,
         })
+    }
+
+    pub fn saturation(&self) -> AnomalySaturation {
+        AnomalySaturation {
+            syn_flood: self.syn_flood.saturation,
+            port_scan: self.port_scan.saturation,
+        }
     }
 
     pub fn observe(
@@ -233,12 +289,16 @@ impl<T: Copy + Ord + Hash> CountWindow<T> {
             self.pop_oldest();
         }
     }
-    fn observe(&mut self, ts: f64, value: T, room: bool) {
+    fn observe(&mut self, ts: f64, value: T, room: bool, saturation: &mut DetectorSaturation) {
         let key = (EventTime(ts), value);
         if !self.records.contains_key(&key) {
             if self.records.len() >= MAX_RECORDS_PER_KEY {
                 self.pop_oldest();
+                saturation.per_key_record_evictions =
+                    saturation.per_key_record_evictions.saturating_add(1);
             } else if !room {
+                saturation.record_limit_rejections =
+                    saturation.record_limit_rejections.saturating_add(1);
                 return;
             }
         }
@@ -274,7 +334,7 @@ impl<T: Copy + Ord + Hash> DistinctWindow<T> {
             self.pop_oldest();
         }
     }
-    fn observe(&mut self, ts: f64, value: T, room: bool) {
+    fn observe(&mut self, ts: f64, value: T, room: bool, saturation: &mut DetectorSaturation) {
         let ts = EventTime(ts);
         if let Some(previous) = self.latest.get(&value) {
             if *previous >= ts {
@@ -283,7 +343,11 @@ impl<T: Copy + Ord + Hash> DistinctWindow<T> {
             self.records.remove(&(*previous, value));
         } else if self.records.len() >= MAX_RECORDS_PER_KEY {
             self.pop_oldest();
+            saturation.per_key_record_evictions =
+                saturation.per_key_record_evictions.saturating_add(1);
         } else if !room {
+            saturation.record_limit_rejections =
+                saturation.record_limit_rejections.saturating_add(1);
             return;
         }
         self.records.insert((ts, value));
@@ -312,6 +376,7 @@ struct SynFloodState {
     events: AHashMap<SynFloodKey, CountWindow<IpAddr>>,
     records: usize,
     cooldowns: AHashMap<SynFloodKey, f64>,
+    saturation: DetectorSaturation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -327,6 +392,7 @@ impl SynFloodState {
             events: AHashMap::new(),
             records: 0,
             cooldowns: AHashMap::new(),
+            saturation: DetectorSaturation::default(),
         }
     }
 
@@ -358,15 +424,15 @@ impl SynFloodState {
             return None;
         }
         if !self.events.contains_key(&key)
-            && (self.events.len() >= MAX_KEYS
-                || self.records >= MAX_RECORDS
-                || self.cooldowns.len() >= MAX_KEYS)
+            && self
+                .saturation
+                .reject_new_key(self.events.len(), self.records, self.cooldowns.len())
         {
             return None;
         }
         let events = self.events.entry(key).or_default();
         let previous = events.records.len();
-        events.observe(ts, src_ip, self.records < MAX_RECORDS);
+        events.observe(ts, src_ip, self.records < MAX_RECORDS, &mut self.saturation);
         self.records = self.records - previous + events.records.len();
         let syn_count = events.total;
         let unique_sources = events.counts.len();
@@ -430,6 +496,7 @@ struct PortScanState {
     events: AHashMap<IpAddr, ScanWindow>,
     records: usize,
     cooldowns: AHashMap<IpAddr, f64>,
+    saturation: DetectorSaturation,
 }
 
 impl PortScanState {
@@ -439,6 +506,7 @@ impl PortScanState {
             events: AHashMap::new(),
             records: 0,
             cooldowns: AHashMap::new(),
+            saturation: DetectorSaturation::default(),
         }
     }
 
@@ -476,20 +544,25 @@ impl PortScanState {
             return None;
         }
         if !self.events.contains_key(&src_ip)
-            && (self.events.len() >= MAX_KEYS
-                || self.records >= MAX_RECORDS
-                || self.cooldowns.len() >= MAX_KEYS)
+            && self
+                .saturation
+                .reject_new_key(self.events.len(), self.records, self.cooldowns.len())
         {
             return None;
         }
         let events = self.events.entry(src_ip).or_default();
         let previous = events.len();
-        events
-            .ports
-            .observe(ts, dst_port, self.records < MAX_RECORDS);
+        events.ports.observe(
+            ts,
+            dst_port,
+            self.records < MAX_RECORDS,
+            &mut self.saturation,
+        );
         self.records = self.records - previous + events.len();
         let previous = events.len();
-        events.hosts.observe(ts, dst_ip, self.records < MAX_RECORDS);
+        events
+            .hosts
+            .observe(ts, dst_ip, self.records < MAX_RECORDS, &mut self.saturation);
         self.records = self.records - previous + events.len();
         let unique_ports = events.ports.latest.len();
         let unique_hosts = events.hosts.latest.len();
@@ -639,6 +712,14 @@ mod tests {
         }
         assert_eq!(detector.syn_flood.records, MAX_RECORDS_PER_KEY);
         assert_eq!(detector.port_scan.records, 2);
+        let saturation = AnomalySaturation {
+            syn_flood: DetectorSaturation {
+                per_key_record_evictions: 20_000 - MAX_RECORDS_PER_KEY as u64,
+                ..DetectorSaturation::default()
+            },
+            ..AnomalySaturation::default()
+        };
+        assert_eq!(detector.saturation(), saturation);
         assert_eq!(
             detector
                 .syn_flood
@@ -653,6 +734,7 @@ mod tests {
         detector.advance_time(200.0);
         assert_eq!(detector.syn_flood.records, 0);
         assert_eq!(detector.port_scan.records, 0);
+        assert_eq!(detector.saturation(), saturation);
     }
 
     #[test]
@@ -665,7 +747,25 @@ mod tests {
             }
         }
         assert_eq!(detector.syn_flood.records, MAX_RECORDS);
-        assert!(detector.port_scan.records <= MAX_RECORDS);
+        assert_eq!(detector.port_scan.records, MAX_RECORDS);
+        let full = detector.saturation();
+        assert_eq!(
+            full.syn_flood.record_limit_rejections,
+            256 * 300 - MAX_RECORDS as u64
+        );
+        assert!(full.port_scan.record_limit_rejections > 0);
+        let _ = observe_syn(&mut detector, 100.0, [10, 0, 0, 1], [192, 0, 2, 1], 80);
+        assert_eq!(
+            detector.saturation(),
+            full,
+            "an existing record needs no space"
+        );
+        let _ = observe_syn(&mut detector, 100.0, [10, 0, 0, 1], [192, 0, 2, 2], 999);
+        assert_eq!(
+            detector.saturation().port_scan.record_limit_rejections,
+            full.port_scan.record_limit_rejections + 2
+        );
+        let full = detector.saturation();
         assert_eq!(
             detector.syn_flood.records,
             detector
@@ -691,6 +791,45 @@ mod tests {
         }
         assert_eq!(detector.syn_flood.events.len(), MAX_KEYS);
         assert_eq!(detector.port_scan.events.len(), MAX_KEYS);
+        let mut expected = full;
+        expected.syn_flood.key_limit_rejections += 100;
+        expected.port_scan.key_limit_rejections += 100;
+        assert_eq!(detector.saturation(), expected);
+    }
+
+    #[test]
+    fn full_cooldown_tables_reject_new_keys_without_counting_active_cooldowns() {
+        let mut cfg = config();
+        cfg.syn_flood.syn_threshold = 1;
+        cfg.syn_flood.unique_src_threshold = 1;
+        cfg.syn_flood.cooldown_secs = 60.0;
+        cfg.port_scan.unique_ports_threshold = 1;
+        cfg.port_scan.cooldown_secs = 60.0;
+        let mut detector = AnomalyDetector::new(cfg);
+        let dst = [192, 0, 2, 1];
+        for index in 0..MAX_KEYS {
+            let source = Ipv4Addr::from(0x0a00_0001 + index as u32).octets();
+            assert_eq!(
+                observe_syn(&mut detector, 100.0, source, dst, index as u16).len(),
+                2
+            );
+        }
+        assert!(observe_syn(&mut detector, 130.0, [10, 0, 0, 1], dst, 0).is_empty());
+        assert_eq!(detector.saturation(), AnomalySaturation::default());
+        assert!(observe_syn(&mut detector, 130.0, [10, 9, 0, 1], dst, 60_000).is_empty());
+        let expected = DetectorSaturation {
+            cooldown_key_limit_rejections: 1,
+            ..DetectorSaturation::default()
+        };
+        assert_eq!(detector.saturation().syn_flood, expected);
+        assert_eq!(detector.saturation().port_scan, expected);
+
+        assert_eq!(
+            observe_syn(&mut detector, 161.0, [10, 9, 0, 1], dst, 60_000).len(),
+            2
+        );
+        assert_eq!(detector.saturation().syn_flood, expected);
+        assert_eq!(detector.saturation().port_scan, expected);
     }
 
     #[test]
@@ -772,6 +911,7 @@ mod tests {
             .expect("the source's newer in-window event should remain");
         assert_eq!(active_scan_events.ports.latest.len(), 1);
         assert_eq!(active_scan_events.ports.records.first().unwrap().0.0, 20.0);
+        assert_eq!(detector.saturation(), AnomalySaturation::default());
     }
 
     #[test]

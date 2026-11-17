@@ -366,6 +366,13 @@ fn print_run_summary(summary: &RunSummary) {
     println!("  Flows expired:      {}", summary.flows_expired);
     println!("  Flows evicted:      {}", summary.flows_evicted);
     println!("  Alerts emitted:     {}", summary.alerts_emitted);
+    if summary.effective_config.anomaly_detection {
+        println!(
+            "  Anomaly evidence discards: {} SYN flood, {} port scan",
+            summary.anomaly_saturation.syn_flood.total(),
+            summary.anomaly_saturation.port_scan.total()
+        );
+    }
     println!("  Elapsed:            {:.3}s", summary.elapsed_wall_seconds);
     println!(
         "  Kernel/interface drops: {}/{}",
@@ -1364,6 +1371,7 @@ fn run_capture_inline(
                         kernel_delta.dropped,
                         kernel_delta.if_dropped,
                     );
+                    metrics::set_anomaly_saturation(anomaly_detector.saturation());
 
                     let tick = web::messages::StatsTick {
                         ts: std::time::SystemTime::now()
@@ -1416,6 +1424,11 @@ fn run_capture_inline(
         final_error.get_or_insert_with(|| err.to_string());
     }
     sync_flow_accounting(accounting, &flow_tracker);
+    accounting.anomaly_saturation = anomaly_detector.saturation();
+    #[cfg(feature = "dashboard")]
+    if web_handle.is_some() {
+        metrics::set_anomaly_saturation(accounting.anomaly_saturation);
+    }
     accounting.output_errors.extend(output_sinks.take_errors());
 
     if let Err(err) = flush_savefile(&mut savefile) {

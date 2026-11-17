@@ -53,7 +53,7 @@ The two detectors are configurable heuristics, not signature-based intrusion det
 - **SYN flood:** counts initial TCP SYN observations in a sliding time window and requires both the configured SYN count and unique-source threshold for a target.
 - **Port scan:** counts distinct destination ports and hosts observed from a source within its configured window; either positive unique-target threshold can fire the alert. Setting one threshold to zero disables that criterion.
 
-SYN counts update incrementally; repeated SYNs with the same timestamp and source share one counted record. Scan targets keep only their latest timestamp. Each detector admits at most 4,096 keys and 65,536 records, with at most 4,096 timestamp/source records per SYN target or 4,096 distinct values per scan dimension. Full per-key windows discard their oldest evidence; global saturation blocks new records or keys until expiry frees space. Saturation can miss alerts, so thresholds above the retained evidence limit should be avoided.
+SYN counts update incrementally; repeated SYNs with the same timestamp and source share one counted record. Scan targets keep only their latest timestamp. Each detector admits at most 4,096 keys and 65,536 records, with at most 4,096 timestamp/source records per SYN target or 4,096 distinct values per scan dimension. Full per-key windows discard their oldest evidence; global saturation blocks new records or keys until expiry frees space. Saturation can miss alerts. The [run summary](reference.md#run-summary-fields) reports evidence discarded at each limit.
 
 Each detector has a per-key cooldown. Expired observations and cooldowns are pruned even when a key becomes inactive. Out-of-order capture timestamps use a monotonic event-time watermark so state does not move backward. A benign scanner, inventory check, or traffic burst may meet a threshold; a PCAP alone cannot establish intent, service impact, or whether a handshake completed.
 
@@ -78,3 +78,5 @@ python3 scripts/perf/test_live_capture.py
 ```
 
 Add coverage for observable behavior or a concrete regression risk. Keep long performance runs and privileged live replay outside ordinary CI.
+
+The [fuzz targets](../fuzz/README.md) exercise packet decoding, DNS compression, TLS ClientHello lengths, and shard routing.
