@@ -72,7 +72,16 @@ pub fn write_flow_json(
     flows: &[FlowSnapshot],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let file = crate::output_file::create(path)?;
-    serde_json::to_writer_pretty(file, flows)?;
+    write_flow_json_to_writer(file, flows)
+}
+
+fn write_flow_json_to_writer<W: Write>(
+    writer: W,
+    flows: &[FlowSnapshot],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut writer = BufWriter::new(writer);
+    serde_json::to_writer_pretty(&mut writer, flows)?;
+    writer.flush()?;
     Ok(())
 }
 
@@ -222,6 +231,27 @@ mod tests {
     use super::*;
     use crate::flow::{Endpoint, ExpiredFlowReason, FlowDirection, FlowProtocol, TcpState};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn json_propagates_errors_writing_the_final_buffer() {
+        struct RejectWrites;
+        impl Write for RejectWrites {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        // The empty array fits in the buffer, so the write fails during flush.
+        let error = write_flow_json_to_writer(RejectWrites, &[]).unwrap_err();
+        assert_eq!(
+            error.downcast::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::BrokenPipe
+        );
+    }
 
     #[test]
     fn csv_propagates_buffered_write_and_flush_errors() {
