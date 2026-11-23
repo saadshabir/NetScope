@@ -10,6 +10,19 @@ This page documents NetScope's offline benchmark system, optimization measuremen
 
 ## Results
 
+### 2026-11-20 JSON flow export
+
+Buffering batches the small writes from the pretty JSON serializer. An explicit flush returns errors from writing the final buffered bytes. [Rust `BufWriter` documentation](https://doc.rust-lang.org/std/io/struct.BufWriter.html)
+
+A release-mode harness called `write_flow_json` from baseline `d15a990` and the buffered build. Both exported the same ordered snapshots from the synthetic high-cardinality workload to a regular APFS file. One warm-up pair preceded seven measured pairs at each size, reversing the variant order each time. The timer started after snapshot creation and covered opening or truncating the file, serialization, and writing to the OS. Runs used an Apple M4 with macOS 27.2.1 and Rust 1.93.1 inside the workspace sandbox.
+
+| Retained flows | JSON size (MiB) | Unbuffered median [range] | Buffered median [range] |
+| ---: | ---: | ---: | ---: |
+| 25,000 | 16.1 | 8.19 s [8.01–12.85 s] | 17.2 ms [17.0–27.8 ms] |
+| 100,000 | 64.5 | 33.69 s [33.04–33.97 s] | 68.8 ms [65.7–71.9 ms] |
+
+For each flow count, the output size and SHA-256 matched across all runs. The [benchmark harness and reproduction instructions](../scripts/perf/flow-json-export/README.md) show how to regenerate the per-run results.
+
 ### 2026-10-10 build and reporting pass
 
 The [optimization plan](optimization-plan.md) ships a first phase: narrower dependency features, an optional dashboard enabled by default, fewer inline clock reads when stats are disabled, deferred scale-mode IPv6 reservation, and bounded exact top-N reporting. The headless command is `cargo build --locked --release --no-default-features`. A headless dashboard request fails before capture or output files are opened.
