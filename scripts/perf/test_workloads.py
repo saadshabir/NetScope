@@ -1,13 +1,17 @@
-"""Verify generated packets are usable beyond NetScope's checksum-blind parser."""
+"""Verify benchmark packet checksums and reproducibility of the smoke PCAPs."""
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
+import json
 import random
 import struct
+import tempfile
 import unittest
+from pathlib import Path
 
-from workloads import _make_packet
+from workloads import ROOT, _make_packet, generate_workload
 
 
 def checksum_valid(data: bytes) -> bool:
@@ -42,6 +46,27 @@ class WorkloadChecksumTests(unittest.TestCase):
                     self.assertTrue(checksum_valid(pseudo_header + segment))
                 seen.add(protocol)
         self.assertEqual(seen, {1, 6, 17})
+
+
+class SmokeWorkloadTests(unittest.TestCase):
+    def test_smoke_workloads_match_tracked_manifests(self) -> None:
+        reference_dir = ROOT / "docs" / "benchmarks" / "workloads-10k-smoke"
+        packet_count = 10_000
+        with tempfile.TemporaryDirectory() as directory:
+            for workload in ("steady-flow", "high-cardinality", "mixed", "analysis-heavy"):
+                with self.subTest(workload=workload):
+                    trace = Path(directory) / f"{workload}-{packet_count}.pcap"
+                    manifest_name = f"{trace.name}.manifest.json"
+                    expected = json.loads((reference_dir / manifest_name).read_text())
+                    generate_workload(workload, packet_count, trace)
+                    self.assertEqual(
+                        hashlib.sha256(trace.read_bytes()).hexdigest(),
+                        expected["pcap_sha256"],
+                    )
+                    self.assertEqual(
+                        json.loads(trace.with_name(manifest_name).read_text()),
+                        expected,
+                    )
 
 
 if __name__ == "__main__":

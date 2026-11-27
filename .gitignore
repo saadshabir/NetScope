@@ -5,6 +5,7 @@
 /tmp/
 /docs/benchmarks/offline-*/
 /docs/benchmarks/optimization-*/
+/docs/benchmarks/workloads-10k-smoke/*.pcap
 
 # Local secrets and platform metadata
 .env
