@@ -235,6 +235,35 @@ const MAX_KEYS: usize = 4096;
 const MAX_RECORDS: usize = 65_536;
 const MAX_RECORDS_PER_KEY: usize = 4096;
 
+const SHRINK_AFTER_LOW_USAGE_SWEEPS: u8 = 3;
+
+#[derive(Debug, Clone, Default)]
+struct MapCleanup {
+    low_usage_sweeps: u8,
+}
+
+impl MapCleanup {
+    fn retain<K: Eq + Hash, V>(
+        &mut self,
+        map: &mut AHashMap<K, V>,
+        keep: impl FnMut(&K, &mut V) -> bool,
+    ) {
+        // Count entries before expiration so a burst between sweeps resets the streak.
+        let used = map.len();
+        map.retain(keep);
+        if used > map.capacity() / 4 {
+            self.low_usage_sweeps = 0;
+            return;
+        }
+
+        self.low_usage_sweeps += 1;
+        if self.low_usage_sweeps == SHRINK_AFTER_LOW_USAGE_SWEEPS {
+            map.shrink_to_fit();
+            self.low_usage_sweeps = 0;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct EventTime(f64);
 impl PartialEq for EventTime {
@@ -374,8 +403,10 @@ impl ScanWindow {
 struct SynFloodState {
     config: SynFloodConfig,
     events: AHashMap<SynFloodKey, CountWindow<IpAddr>>,
+    event_cleanup: MapCleanup,
     records: usize,
     cooldowns: AHashMap<SynFloodKey, f64>,
+    cooldown_cleanup: MapCleanup,
     saturation: DetectorSaturation,
 }
 
@@ -390,8 +421,10 @@ impl SynFloodState {
         SynFloodState {
             config,
             events: AHashMap::new(),
+            event_cleanup: MapCleanup::default(),
             records: 0,
             cooldowns: AHashMap::new(),
+            cooldown_cleanup: MapCleanup::default(),
             saturation: DetectorSaturation::default(),
         }
     }
@@ -475,7 +508,7 @@ impl SynFloodState {
     /// Remove events outside their configured window and expired cooldowns.
     fn cleanup(&mut self, now: f64) {
         let cutoff = now - configured_window(self.config.window_secs);
-        self.events.retain(|_, events| {
+        self.event_cleanup.retain(&mut self.events, |_, events| {
             events.expire(cutoff);
             !events.records.is_empty()
         });
@@ -484,9 +517,8 @@ impl SynFloodState {
             .values()
             .map(|events| events.records.len())
             .sum();
-        self.cooldowns.retain(|_, until| *until > now);
-        self.events.shrink_to_fit();
-        self.cooldowns.shrink_to_fit();
+        self.cooldown_cleanup
+            .retain(&mut self.cooldowns, |_, until| *until > now);
     }
 }
 
@@ -494,8 +526,10 @@ impl SynFloodState {
 struct PortScanState {
     config: PortScanConfig,
     events: AHashMap<IpAddr, ScanWindow>,
+    event_cleanup: MapCleanup,
     records: usize,
     cooldowns: AHashMap<IpAddr, f64>,
+    cooldown_cleanup: MapCleanup,
     saturation: DetectorSaturation,
 }
 
@@ -504,8 +538,10 @@ impl PortScanState {
         PortScanState {
             config,
             events: AHashMap::new(),
+            event_cleanup: MapCleanup::default(),
             records: 0,
             cooldowns: AHashMap::new(),
+            cooldown_cleanup: MapCleanup::default(),
             saturation: DetectorSaturation::default(),
         }
     }
@@ -607,14 +643,13 @@ impl PortScanState {
     /// Remove events outside their configured window and expired cooldowns.
     fn cleanup(&mut self, now: f64) {
         let cutoff = now - configured_window(self.config.window_secs);
-        self.events.retain(|_, events| {
+        self.event_cleanup.retain(&mut self.events, |_, events| {
             events.expire(cutoff);
             events.len() > 0
         });
         self.records = self.events.values().map(ScanWindow::len).sum();
-        self.cooldowns.retain(|_, until| *until > now);
-        self.events.shrink_to_fit();
-        self.cooldowns.shrink_to_fit();
+        self.cooldown_cleanup
+            .retain(&mut self.cooldowns, |_, until| *until > now);
     }
 }
 
@@ -860,12 +895,14 @@ mod tests {
     }
 
     #[test]
-    fn expired_one_time_keys_are_removed_after_a_timestamp_sweep() {
+    fn expiration_and_capacity_reclamation_follow_each_maps_usage() {
         let mut cfg = config();
         cfg.syn_flood.syn_threshold = 1;
         cfg.syn_flood.unique_src_threshold = 1;
         cfg.port_scan.unique_ports_threshold = 1;
         cfg.port_scan.unique_hosts_threshold = 1;
+        cfg.syn_flood.cooldown_secs = 70.0;
+        cfg.port_scan.cooldown_secs = 70.0;
         let mut detector = AnomalyDetector::new(cfg);
 
         for index in 0..1024u32 {
@@ -884,12 +921,51 @@ mod tests {
 
         assert_eq!(detector.syn_flood.events.len(), 1);
         assert_eq!(detector.port_scan.events.len(), 1);
+        assert_eq!(detector.syn_flood.records, 1);
+        assert_eq!(detector.port_scan.records, 2);
+        assert_eq!(detector.syn_flood.cooldowns.len(), 1025);
+        assert_eq!(detector.port_scan.cooldowns.len(), 1025);
+        assert!(detector.syn_flood.events.capacity() > 8);
+        assert!(detector.port_scan.events.capacity() > 8);
+
+        detector.advance_time(161.0);
+        detector.advance_time(191.0);
+        assert_eq!(detector.syn_flood.records, 0);
+        assert_eq!(detector.port_scan.records, 0);
         assert_eq!(detector.syn_flood.cooldowns.len(), 1);
         assert_eq!(detector.port_scan.cooldowns.len(), 1);
-        assert!(detector.syn_flood.events.capacity() <= 8);
-        assert!(detector.port_scan.events.capacity() <= 8);
-        assert!(detector.syn_flood.cooldowns.capacity() <= 8);
-        assert!(detector.port_scan.cooldowns.capacity() <= 8);
+        assert!(detector.syn_flood.events.capacity() > 8);
+        assert!(detector.port_scan.events.capacity() > 8);
+
+        detector.advance_time(221.0);
+        assert_eq!(detector.syn_flood.events.capacity(), 0);
+        assert_eq!(detector.port_scan.events.capacity(), 0);
+        assert!(detector.syn_flood.cooldowns.is_empty());
+        assert!(detector.port_scan.cooldowns.is_empty());
+        detector.advance_time(251.0);
+        assert!(detector.syn_flood.cooldowns.capacity() > 8);
+        assert!(detector.port_scan.cooldowns.capacity() > 8);
+
+        detector.advance_time(281.0);
+        assert_eq!(detector.syn_flood.cooldowns.capacity(), 0);
+        assert_eq!(detector.port_scan.cooldowns.capacity(), 0);
+    }
+
+    #[test]
+    fn a_refill_between_sweeps_restarts_the_low_usage_streak() {
+        let mut map = AHashMap::new();
+        let mut cleanup = MapCleanup::default();
+        for _ in 0..2 {
+            map.extend((0..1024).map(|key| (key, key)));
+            cleanup.retain(&mut map, |key, _| *key == 0);
+            for _ in 0..2 {
+                cleanup.retain(&mut map, |_, _| true);
+                assert!(map.capacity() > 8);
+            }
+        }
+        cleanup.retain(&mut map, |_, _| true);
+        assert!(map.capacity() <= 8);
+        assert_eq!(map.get(&0), Some(&0));
     }
 
     #[test]

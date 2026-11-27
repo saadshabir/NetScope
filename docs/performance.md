@@ -10,6 +10,43 @@ This page documents NetScope's offline benchmark system, optimization measuremen
 
 ## Results
 
+### 2026-11-27 anomaly detector cleanup
+
+The SYN flood and port scan detectors expire stale entries on each 30-second capture-time sweep. Each event and cooldown map now shrinks after three consecutive sweeps where its pre-expiration entry count is at most a quarter of its post-expiration capacity. A refill resets that map's count when it crosses the threshold.
+
+The release-mode harness feeds the public anomaly detector 600 batches of 4,096 distinct synthetic TCP SYN observations per run. Batches are 60 capture seconds apart in the burst workload and 600 capture seconds apart in the long-idle workload. Between batches, the harness advances the watermark every 30 seconds. Each run checks that both detectors emit 2,457,600 alerts and report zero saturation.
+
+On an Apple M4 with macOS 27.2.1 and Rust 1.93.1, each workload had a warm-up pair and seven measured pairs with alternating run order. A second set of long-idle trials repeated the comparison after a candidate peak RSS outlier. The table includes all 14 measured long-idle pairs.
+
+| Workload | CPU seconds before, median [range] | CPU seconds after, median [range] | Peak RSS MiB before, median [range] | Peak RSS MiB after, median [range] |
+| --- | ---: | ---: | ---: | ---: |
+| Burst | 1.247 [1.228–1.263] | 1.115 [1.099–1.161] | 13.91 [13.88–14.39] | 13.70 [13.70–13.72] |
+| Long idle | 1.240 [1.228–1.264] | 1.243 [1.222–1.326] | 13.89 [13.88–14.16] | 13.88 [13.88–19.50] |
+
+Burst median CPU fell 10.6%. Long-idle medians were similar, with one candidate run at 19.50 MiB peak RSS. The other 13 measured candidate long-idle runs peaked at 13.91 MiB or lower. CPU includes user and system time for the whole harness process, and peak RSS includes allocator retention.
+
+To reproduce on macOS or Linux, run from the repo root with Python 3.9+, the pinned Rust toolchain, and libpcap installed. The build script forwards the native library paths reported by Cargo. The Linux workload reads peak RSS from `VmHWM` in `/proc/self/status`. On macOS the driver collects it with `wait4`. [Workload harness](../scripts/perf/anomaly-cleanup/workload.rs), [build script](../scripts/perf/anomaly-cleanup/build.py), [measurement driver](../scripts/perf/anomaly-cleanup/measure.py)
+
+```sh
+set -e
+mkdir -p tmp/perf
+run_dir=$(mktemp -d "$PWD/tmp/perf/anomaly-cleanup.XXXXXX")
+mkdir "$run_dir/baseline"
+git archive c2f6fe3fcac95c7a22eaec799c408ca3a1688647 |
+  tar -x -C "$run_dir/baseline"
+
+python3 scripts/perf/anomaly-cleanup/build.py "$run_dir"
+python3 scripts/perf/anomaly-cleanup/measure.py "$run_dir" burst
+python3 scripts/perf/anomaly-cleanup/measure.py "$run_dir" idle
+
+mkdir "$run_dir/idle-repeat"
+ln -s ../before "$run_dir/idle-repeat/before"
+ln -s ../after "$run_dir/idle-repeat/after"
+python3 scripts/perf/anomaly-cleanup/measure.py "$run_dir/idle-repeat" idle
+```
+
+The driver writes each run to `results-burst.jsonl` or `results-idle.jsonl` in the run directory.
+
 ### 2026-11-20 JSON flow export
 
 Buffering batches the small writes from the pretty JSON serializer. An explicit flush returns errors from writing the final buffered bytes. [Rust `BufWriter` documentation](https://doc.rust-lang.org/std/io/struct.BufWriter.html)
