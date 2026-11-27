@@ -3,7 +3,8 @@
 use serde::Serialize;
 use std::path::Path;
 
-use crate::{analysis::anomaly::AnomalySaturation, protocol::LinkType};
+use crate::analysis::anomaly::AnomalySaturation;
+use crate::protocol::{LinkType, ParseError, ParsedPacket};
 
 pub const SUMMARY_SCHEMA_VERSION: u32 = 1;
 
@@ -31,6 +32,75 @@ pub struct RunAccounting {
     pub kernel_drops: Option<u64>,
     pub interface_drops: Option<u64>,
     pub output_errors: Vec<String>,
+}
+
+impl RunAccounting {
+    #[inline]
+    pub fn record_input_frame(&mut self, wire_len: u64) -> u64 {
+        self.frames_read += 1;
+        self.input_wire_bytes = self.input_wire_bytes.saturating_add(wire_len);
+        self.frames_read
+    }
+
+    #[inline]
+    pub fn record_packet_parse(&mut self, result: &Result<ParsedPacket<'_>, ParseError>) {
+        PacketParseCounters {
+            parsed_packets: &mut self.packets_parsed,
+            packets_with_network_header: &mut self.packets_with_network_header,
+            packets_with_transport_header: &mut self.packets_with_transport_header,
+            packet_parse_errors: &mut self.packet_parse_errors,
+            transport_parse_errors: &mut self.transport_parse_errors,
+            unsupported_packets: &mut self.unsupported_packets,
+            malformed_or_unsupported_packets: &mut self.malformed_or_unsupported_packets,
+        }
+        .record(result);
+    }
+}
+
+/// The classification counters shared by inline capture and pipeline workers.
+pub(crate) struct PacketParseCounters<'a> {
+    pub parsed_packets: &'a mut u64,
+    pub packets_with_network_header: &'a mut u64,
+    pub packets_with_transport_header: &'a mut u64,
+    pub packet_parse_errors: &'a mut u64,
+    pub transport_parse_errors: &'a mut u64,
+    pub unsupported_packets: &'a mut u64,
+    pub malformed_or_unsupported_packets: &'a mut u64,
+}
+
+impl PacketParseCounters<'_> {
+    #[inline]
+    pub(crate) fn record(self, result: &Result<ParsedPacket<'_>, ParseError>) {
+        match result {
+            Ok(packet) => {
+                *self.parsed_packets = self.parsed_packets.saturating_add(1);
+                if packet.network.is_some() {
+                    *self.packets_with_network_header =
+                        self.packets_with_network_header.saturating_add(1);
+                }
+                if packet.transport.is_some() {
+                    *self.packets_with_transport_header =
+                        self.packets_with_transport_header.saturating_add(1);
+                }
+                let malformed = packet.transport_parse_error.is_some();
+                if malformed {
+                    *self.transport_parse_errors = self.transport_parse_errors.saturating_add(1);
+                }
+                if packet.unsupported {
+                    *self.unsupported_packets = self.unsupported_packets.saturating_add(1);
+                }
+                if malformed || packet.unsupported {
+                    *self.malformed_or_unsupported_packets =
+                        self.malformed_or_unsupported_packets.saturating_add(1);
+                }
+            }
+            Err(_) => {
+                *self.packet_parse_errors = self.packet_parse_errors.saturating_add(1);
+                *self.malformed_or_unsupported_packets =
+                    self.malformed_or_unsupported_packets.saturating_add(1);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

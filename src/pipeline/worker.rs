@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use crate::config::{AnalysisConfig, FlowConfig, WebConfig};
 use crate::flow::{ExpiredFlowEvent, FlowDelta, FlowSnapshot, FlowTracker, FlowTrackerStats};
 use crate::protocol;
+use crate::run_summary::PacketParseCounters;
 #[cfg(feature = "dashboard")]
 use crate::web::messages::{PacketSample, StoredPacket};
 
@@ -60,6 +61,25 @@ pub struct WorkerRunStats {
     pub unsupported_packets: u64,
     pub malformed_or_unsupported_packets: u64,
     pub flows: FlowTrackerStats,
+}
+
+impl WorkerRunStats {
+    #[inline]
+    fn record_packet_parse(
+        &mut self,
+        result: &Result<protocol::ParsedPacket<'_>, protocol::ParseError>,
+    ) {
+        PacketParseCounters {
+            parsed_packets: &mut self.parsed_packets,
+            packets_with_network_header: &mut self.packets_with_network_header,
+            packets_with_transport_header: &mut self.packets_with_transport_header,
+            packet_parse_errors: &mut self.packet_parse_errors,
+            transport_parse_errors: &mut self.transport_parse_errors,
+            unsupported_packets: &mut self.unsupported_packets,
+            malformed_or_unsupported_packets: &mut self.malformed_or_unsupported_packets,
+        }
+        .record(result);
+    }
 }
 
 pub struct Worker {
@@ -214,34 +234,10 @@ impl Worker {
         self.tick_bytes += pkt.wire_len;
         self.tick_packets += 1;
 
-        match protocol::parse_packet_with_linktype(&pkt.data, self.link_type) {
+        let result = protocol::parse_packet_with_linktype(&pkt.data, self.link_type);
+        self.run_stats.record_packet_parse(&result);
+        match result {
             Ok(parsed) => {
-                self.run_stats.parsed_packets = self.run_stats.parsed_packets.saturating_add(1);
-                if parsed.network.is_some() {
-                    self.run_stats.packets_with_network_header =
-                        self.run_stats.packets_with_network_header.saturating_add(1);
-                }
-                if parsed.transport.is_some() {
-                    self.run_stats.packets_with_transport_header = self
-                        .run_stats
-                        .packets_with_transport_header
-                        .saturating_add(1);
-                }
-                if parsed.transport_parse_error.is_some() {
-                    self.run_stats.transport_parse_errors =
-                        self.run_stats.transport_parse_errors.saturating_add(1);
-                }
-                if parsed.unsupported {
-                    self.run_stats.unsupported_packets =
-                        self.run_stats.unsupported_packets.saturating_add(1);
-                }
-                if parsed.transport_parse_error.is_some() || parsed.unsupported {
-                    self.run_stats.malformed_or_unsupported_packets = self
-                        .run_stats
-                        .malformed_or_unsupported_packets
-                        .saturating_add(1);
-                }
-
                 // Flow tracking
                 if self.emit_expired_flows {
                     self.flow_tracker.observe_collect(
@@ -292,12 +288,6 @@ impl Worker {
                 }
             }
             Err(e) => {
-                self.run_stats.packet_parse_errors =
-                    self.run_stats.packet_parse_errors.saturating_add(1);
-                self.run_stats.malformed_or_unsupported_packets = self
-                    .run_stats
-                    .malformed_or_unsupported_packets
-                    .saturating_add(1);
                 tracing::trace!(shard = self.shard_id, error = %e, "parse error");
             }
         }

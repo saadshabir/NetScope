@@ -116,13 +116,13 @@ Baseline code is commit `99fb924`; optimized code is `dc4181c`. Use the [offline
 
 ### Earlier measurements
 
-The September benchmark bundles and profiling output have been removed because they included local filesystem paths. Generate fresh runs with the commands below. [Checksummed 10,000-packet smoke PCAPs and manifests](benchmarks/workloads-10k-smoke/) remain available as synthetic inputs.
+The September benchmark bundles and profiling output have been removed because they included local filesystem paths. Generate fresh runs with the commands below. The [10,000-packet smoke manifests](benchmarks/workloads-10k-smoke/) record the expected SHA-256 hashes for the generated PCAPs.
 
 ## Recreating workloads
 
 `scripts/perf/workloads.py` streams deterministic synthetic classic-PCAP records to disk and writes a sidecar manifest with the seed, SHA-256, count, byte totals, packet-size distribution, protocol mix, distinct flow cardinality, and timestamp spacing. Version 2 generates valid IPv4, TCP, UDP, and ICMP checksums. It supports `steady-flow`, `high-cardinality`, `mixed`, and `analysis-heavy` traffic. The steady-flow trace starts midstream with ACK packets; it does not model a TCP handshake.
 
-Generate a short smoke trace for each workload:
+Generate the four 10,000-packet smoke traces from the repository root.
 
 ```bash
 python3 scripts/perf/workloads.py \
@@ -130,6 +130,8 @@ python3 scripts/perf/workloads.py \
   --workload all \
   --counts 10000
 ```
+
+Run `python3 scripts/perf/test_workloads.py` to regenerate the smoke traces in a temporary directory and verify their SHA-256 hashes and manifests against the tracked references. CI runs the same check.
 
 Generate larger high-cardinality inputs when profiling or checking scale:
 

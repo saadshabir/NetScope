@@ -61,11 +61,11 @@ For inline top-N reporting, compare reusable candidate storage with a bounded ex
 
 5. **Simplify code without building another framework.**
 
-Extract capture-source and rotating-PCAP handling from `src/main.rs`; move CLI override/validation logic into a focused runtime-configuration module; then separate inline and pipeline orchestration. Consolidate the duplicated parsed-packet accounting with a small shared helper. Keep mode-specific lifecycle and backpressure explicit. These are maintainability changes, not assumed speedups.
+Capture-source handling, PCAP rotation, runtime configuration, and capture orchestration now live in dedicated modules. Inline capture and pipeline workers share packet classification accounting, with each mode managing its own processing lifecycle and backpressure.
 
 Review the older sorted overflow-eviction paths in `src/flow/tracker.rs`: admission now enforces capacity before insertion. Remove the fallback only after proving no production insertion path needs it and adjusting synthetic test setup to respect the same invariant. Keep timeout expiry and second-chance eviction coverage.
 
-`docs/benchmarks/legacy-workloads-v1.py` has no current textual references. Remove it only after confirming it is no longer needed for historical reproduction. The four 10k benchmark PCAPs account for roughly 5.4 MB of tracked data; moving these to generation-on-demand is optional and lower priority. Preserve manifests, reproducible hashes, a documented generation command, and the tiny investigation fixtures. Keep the existing benchmark harness, parser tests, and vendored Chart.js license.
+`docs/benchmarks/legacy-workloads-v1.py` has no current textual references. Remove it only after confirming it is no longer needed for historical reproduction. The performance guide documents how to regenerate the four 10,000-packet benchmark PCAPs and verify them against the tracked manifests. Keep the small investigation fixtures, benchmark harness, parser tests, and vendored Chart.js license.
 
 6. **Validate and finish.**
 
